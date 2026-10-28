@@ -1054,6 +1054,12 @@ $(eval $(call cfg-enable-all-depends,CFG_REGULATOR_FIXED, \
 $(eval $(call cfg-enable-all-depends,CFG_REGULATOR_GPIO, \
 	 CFG_DRIVERS_REGULATOR CFG_DT CFG_DRIVERS_GPIO))
 
+# When enabled, CFG_DRIVERS_SPI_MEM embeds a SPI memory framework in OP-TEE
+# core: the spi-mem operation interface that SPI memory controller drivers
+# implement, and an adapter that runs spi-mem operations on legacy struct
+# spi_chip controllers.
+CFG_DRIVERS_SPI_MEM ?= n
+
 # When enabled, CFG_INSECURE permits insecure configuration of OP-TEE core
 # and shows a print (info level) when booting up the device that
 # indicates that the board runs a standard developer configuration.
