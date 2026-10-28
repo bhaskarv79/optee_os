@@ -709,7 +709,7 @@ TEE_Result core_self_tests(uint32_t nParamTypes __unused,
 	    self_test_sub_overflow() || self_test_mul_unsigned_overflow() ||
 	    self_test_division() || self_test_malloc() ||
 	    self_test_nex_malloc() || self_test_va2pa() ||
-	    self_test_asan()) {
+	    self_test_asan() || self_test_spi_mem()) {
 		EMSG("some self_test_xxx failed! you should enable local LOG");
 		return TEE_ERROR_GENERIC;
 	}

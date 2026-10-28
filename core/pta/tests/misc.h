@@ -55,4 +55,13 @@ core_transfer_list_tests(uint32_t nParamTypes __unused,
 }
 #endif
 
+#if defined(CFG_DRIVERS_SPI_MEM)
+TEE_Result self_test_spi_mem(void);
+#else
+static inline TEE_Result self_test_spi_mem(void)
+{
+	return TEE_SUCCESS;
+}
+#endif
+
 #endif /*CORE_PTA_TESTS_MISC_H*/
