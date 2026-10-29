@@ -115,6 +115,7 @@ subdirs-$(CFG_DRIVERS_PINCTRL) += pinctrl
 subdirs-$(CFG_DRIVERS_REGULATOR) += regulator
 subdirs-$(CFG_DRIVERS_RSTCTRL) += rstctrl
 subdirs-$(CFG_DRIVERS_SPI_MEM) += spi
+subdirs-$(CFG_DRIVERS_SPI_NOR) += spi_nor
 subdirs-$(CFG_DRIVERS_REMOTEPROC) += remoteproc
 subdirs-$(CFG_SCMI_MSG_DRIVERS) += scmi-msg
 subdirs-y += imx

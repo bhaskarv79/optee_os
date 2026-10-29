@@ -1060,6 +1060,12 @@ $(eval $(call cfg-enable-all-depends,CFG_REGULATOR_GPIO, \
 # spi_chip controllers.
 CFG_DRIVERS_SPI_MEM ?= n
 
+# When enabled, CFG_DRIVERS_SPI_NOR embeds a SPI-NOR flash core on top of
+# CFG_DRIVERS_SPI_MEM: JEDEC SFDP discovery with an ID table fallback, and
+# polled read, program and erase.
+CFG_DRIVERS_SPI_NOR ?= n
+$(eval $(call cfg-depends-all,CFG_DRIVERS_SPI_NOR,CFG_DRIVERS_SPI_MEM))
+
 # When enabled, CFG_INSECURE permits insecure configuration of OP-TEE core
 # and shows a print (info level) when booting up the device that
 # indicates that the board runs a standard developer configuration.
