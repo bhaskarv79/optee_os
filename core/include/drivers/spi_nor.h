@@ -139,4 +139,25 @@ static inline TEE_Result spi_nor_get(unsigned int index __unused,
 }
 #endif /* CFG_DRIVERS_SPI_NOR */
 
+#ifdef CFG_SPI_NOR_SIM
+/*
+ * spi_nor_sim_get() - The simulated flash, or NULL before it is probed.
+ *	Tests that erase a flash must only use this one.
+ */
+struct spi_nor *spi_nor_sim_get(void);
+#endif
+
+#ifdef CFG_SPI_NOR_EMBEDDED_TEST
+/*
+ * spi_nor_self_test() - SFDP parser and NOR semantics tests on the simulated
+ *	flash; erases and programs it
+ */
+TEE_Result spi_nor_self_test(void);
+#else
+static inline TEE_Result spi_nor_self_test(void)
+{
+	return TEE_SUCCESS;
+}
+#endif
+
 #endif /* __DRIVERS_SPI_NOR_H */

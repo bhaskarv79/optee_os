@@ -1063,8 +1063,22 @@ CFG_DRIVERS_SPI_MEM ?= n
 # When enabled, CFG_DRIVERS_SPI_NOR embeds a SPI-NOR flash core on top of
 # CFG_DRIVERS_SPI_MEM: JEDEC SFDP discovery with an ID table fallback, and
 # polled read, program and erase.
+#
+# CFG_SPI_NOR_SIM adds a simulated SPI-NOR flash of CFG_SPI_NOR_SIM_SIZE bytes
+# in secure RAM, with NOR program/erase semantics and an SFDP table. For
+# testing only, e.g. on QEMU: it requires CFG_INSECURE=y.
+#
+# CFG_SPI_NOR_EMBEDDED_TEST adds the SPI-NOR self tests to the core self tests
+# (xtest 1001). They erase and program the simulated flash only.
 CFG_DRIVERS_SPI_NOR ?= n
+CFG_SPI_NOR_SIM ?= n
+CFG_SPI_NOR_SIM_SIZE ?= 262144
+CFG_SPI_NOR_EMBEDDED_TEST ?= $(call cfg-all-enabled,CFG_SPI_NOR_SIM \
+				  CFG_TEE_CORE_EMBED_INTERNAL_TESTS)
 $(eval $(call cfg-depends-all,CFG_DRIVERS_SPI_NOR,CFG_DRIVERS_SPI_MEM))
+$(eval $(call cfg-depends-all,CFG_SPI_NOR_SIM,CFG_DRIVERS_SPI_NOR))
+$(eval $(call cfg-depends-all,CFG_SPI_NOR_EMBEDDED_TEST,CFG_SPI_NOR_SIM \
+	 CFG_TEE_CORE_EMBED_INTERNAL_TESTS))
 
 # When enabled, CFG_INSECURE permits insecure configuration of OP-TEE core
 # and shows a print (info level) when booting up the device that
@@ -1098,6 +1112,12 @@ endif
 ifneq ($(CFG_INSECURE),y)
 ifneq ($(CFG_CORE_ASLR_SEED),)
 $(error CFG_CORE_ASLR_SEED requires CFG_INSECURE=y)
+endif
+endif
+
+ifneq ($(CFG_INSECURE),y)
+ifeq ($(CFG_SPI_NOR_SIM),y)
+$(error CFG_SPI_NOR_SIM requires CFG_INSECURE=y)
 endif
 endif
 

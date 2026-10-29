@@ -1,0 +1,182 @@
+// SPDX-License-Identifier: BSD-2-Clause
+/*
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+ */
+
+/*
+ * SPI-NOR self tests, run with the core self tests (xtest 1001) when
+ * CFG_SPI_NOR_EMBEDDED_TEST is enabled. They erase and program the simulated
+ * flash.
+ */
+
+#include <drivers/spi_nor.h>
+#include <io.h>
+#include <string.h>
+#include <tee_api_types.h>
+#include <trace.h>
+#include <util.h>
+
+#include "spi_nor_priv.h"
+
+static unsigned int failures;
+
+static void check(bool cond, const char *what, int line)
+{
+	if (!cond) {
+		EMSG("SPI-NOR self test failed at line %d: %s", line, what);
+		failures++;
+	}
+}
+
+#define CHECK(cond)	check((cond), #cond, __LINE__)
+
+struct sfdp_image {
+	uint8_t data[0x10 + 16 * 4];
+};
+
+static TEE_Result image_read(void *ctx, uint32_t addr, void *buf, size_t len)
+{
+	struct sfdp_image *img = ctx;
+
+	if (addr > sizeof(img->data) || len > sizeof(img->data) - addr)
+		return TEE_ERROR_BAD_PARAMETERS;
+
+	memcpy(buf, img->data + addr, len);
+
+	return TEE_SUCCESS;
+}
+
+/* 8 MiB, 4 KiB and 64 KiB erase, 256-byte pages, 3 or 4-byte addresses */
+static void make_image(struct sfdp_image *img, uint8_t bfpt_dwords)
+{
+	uint8_t *bfpt = img->data + 0x10;
+
+	memset(img, 0, sizeof(*img));
+	put_le32(img->data, 0x50444653);
+	img->data[5] = 1;
+	img->data[7] = 0xff;
+	img->data[11] = bfpt_dwords;
+	img->data[12] = 0x10;
+	img->data[15] = 0xff;
+
+	put_le32(bfpt, 0x1 | (0x20 << 8) | (0x1 << 17));
+	put_le32(bfpt + 4, 8 * 1024 * 1024 * 8 - 1);
+	put_le32(bfpt + 7 * 4, 16 | (0xd8 << 8) | (12 << 16) | (0x20 << 24));
+	put_le32(bfpt + 10 * 4, 8 << 4);
+}
+
+static void test_sfdp(void)
+{
+	struct spi_nor_geometry geo = { };
+	struct sfdp_image img = { };
+
+	make_image(&img, 16);
+	CHECK(!spi_nor_sfdp_parse(image_read, &img, &geo));
+	CHECK(geo.size == 8 * 1024 * 1024);
+	CHECK(geo.page_size == 256);
+	CHECK(geo.addr4_capable);
+	/* Erase types come out sorted by size whatever the table order */
+	CHECK(geo.erase[0].size == 0x1000 && geo.erase[0].opcode == 0x20);
+	CHECK(geo.erase[1].size == 0x10000 && geo.erase[1].opcode == 0xd8);
+	CHECK(!geo.erase[2].size);
+
+	/* JESD216 9-dword table: no page size field, default 256 */
+	make_image(&img, 9);
+	CHECK(!spi_nor_sfdp_parse(image_read, &img, &geo));
+	CHECK(geo.page_size == 256);
+
+	make_image(&img, 16);
+	img.data[0] = 'X';
+	CHECK(spi_nor_sfdp_parse(image_read, &img, &geo) ==
+	      TEE_ERROR_ITEM_NOT_FOUND);
+
+	make_image(&img, 8);
+	CHECK(spi_nor_sfdp_parse(image_read, &img, &geo) ==
+	      TEE_ERROR_BAD_FORMAT);
+
+	/* No erase type and no 4 KiB erase in dword 1 */
+	make_image(&img, 16);
+	put_le32(img.data + 0x10, 0);
+	put_le32(img.data + 0x10 + 7 * 4, 0);
+	CHECK(spi_nor_sfdp_parse(image_read, &img, &geo) ==
+	      TEE_ERROR_BAD_FORMAT);
+}
+
+static bool all_bytes(const uint8_t *buf, size_t len, uint8_t val)
+{
+	size_t n = 0;
+
+	for (n = 0; n < len; n++)
+		if (buf[n] != val)
+			return false;
+
+	return true;
+}
+
+static void test_nor(struct spi_nor *nor)
+{
+	struct spi_nor_info info = { };
+	uint8_t data[64] = { };
+	uint8_t buf[64] = { };
+	uint8_t byte = 0;
+	size_t n = 0;
+
+	spi_nor_get_info(nor, &info);
+	CHECK(info.has_sfdp);
+	CHECK(info.size == CFG_SPI_NOR_SIM_SIZE);
+	CHECK(info.page_size == 256 && info.erase_size == 0x1000);
+
+	/* 64 KiB erase on a 64 KiB boundary, then 4 KiB erase */
+	CHECK(!spi_nor_erase(nor, 0, 0x10000 + 0x1000));
+	CHECK(!spi_nor_read(nor, 0x10000 + 0x1000 - sizeof(buf), buf,
+			    sizeof(buf)));
+	CHECK(all_bytes(buf, sizeof(buf), 0xff));
+
+	/* A write across a page boundary is split and verified */
+	for (n = 0; n < sizeof(data); n++)
+		data[n] = n;
+	CHECK(!spi_nor_write(nor, 256 - 20, data, sizeof(data)));
+	CHECK(!spi_nor_read(nor, 256 - 20, buf, sizeof(buf)));
+	CHECK(!memcmp(buf, data, sizeof(data)));
+
+	/* Programming only clears bits: 0xf0 then 0x0f leaves 0x00 */
+	byte = 0xf0;
+	CHECK(!spi_nor_write(nor, 0x800, &byte, 1));
+	byte = 0x0f;
+	CHECK(spi_nor_write(nor, 0x800, &byte, 1) ==
+	      TEE_ERROR_STORAGE_NOT_AVAILABLE);
+	CHECK(!spi_nor_read(nor, 0x800, &byte, 1));
+	CHECK(byte == 0x00);
+
+	/* Erase restores 0xff */
+	CHECK(!spi_nor_erase(nor, 0, 0x1000));
+	CHECK(!spi_nor_read(nor, 0x800, &byte, 1));
+	CHECK(byte == 0xff);
+
+	/* Misaligned and out-of-range requests are rejected */
+	CHECK(spi_nor_erase(nor, 0x100, 0x1000) == TEE_ERROR_BAD_PARAMETERS);
+	CHECK(spi_nor_erase(nor, 0, 0x100) == TEE_ERROR_BAD_PARAMETERS);
+	CHECK(spi_nor_erase(nor, info.size, 0x1000) ==
+	      TEE_ERROR_BAD_PARAMETERS);
+	CHECK(!spi_nor_read(nor, info.size - 1, &byte, 1));
+	CHECK(spi_nor_read(nor, info.size, &byte, 1) ==
+	      TEE_ERROR_BAD_PARAMETERS);
+}
+
+TEE_Result spi_nor_self_test(void)
+{
+	struct spi_nor *nor = spi_nor_sim_get();
+
+	failures = 0;
+	test_sfdp();
+
+	/* Never a real flash: the tests erase it */
+	if (!nor) {
+		EMSG("SPI-NOR self test: no simulated flash");
+		failures++;
+	} else {
+		test_nor(nor);
+	}
+
+	return failures ? TEE_ERROR_GENERIC : TEE_SUCCESS;
+}
