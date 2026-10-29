@@ -171,6 +171,7 @@ exit:
 	return res;
 }
 
+#ifdef CFG_REE_FS
 static TEE_Result get_offs_size(enum tee_fs_htree_type type, size_t idx,
 				uint8_t vers, tee_fs_off_t *offs, size_t *size)
 {
@@ -344,6 +345,7 @@ static const struct tee_fs_backend_ops ree_fs_rpc_backend = {
 	.truncate = ree_fs_rpc_truncate,
 	.remove = ree_fs_rpc_remove,
 };
+#endif /*CFG_REE_FS*/
 
 static TEE_Result ree_fs_ftruncate_internal(struct tee_fs_fd *fdp,
 					    tee_fs_off_t new_file_len)
@@ -597,6 +599,7 @@ static TEE_Result dirf_write(struct tee_file_handle *fh, size_t pos,
 	return ree_fs_write_primitive(fh, pos, buf, NULL, len);
 }
 
+#ifdef CFG_REE_FS
 static struct fs_instance ree_fs_inst;
 
 static TEE_Result ree_dirf_open(bool create, uint8_t *hash,
@@ -791,6 +794,7 @@ static struct fs_instance ree_fs_inst = {
 	.close_dirh = close_dirh,
 	.mutex = MUTEX_INITIALIZER,
 };
+#endif /*CFG_REE_FS*/
 
 /*
  * fs->dirh is caching the dirfile handle to avoid frequent opening and
@@ -1267,6 +1271,7 @@ out:
 	return res;
 }
 
+#ifdef CFG_REE_FS
 static TEE_Result ree_fs_open(struct tee_pobj *po, size_t *size,
 			      struct tee_file_handle **fh)
 {
@@ -1313,3 +1318,131 @@ const struct tee_file_operations ree_fs_ops = {
 	.closedir = ree_fs_closedir_rpc,
 	.readdir = ree_fs_readdir_rpc,
 };
+#endif /*CFG_REE_FS*/
+
+#ifdef CFG_SPI_NOR_FS
+/*
+ * SPI-NOR FS: the same file system on a region of a secure-only SPI-NOR
+ * flash (core/tee/spinor_fs_store.c), with no normal-world involvement.
+ */
+static struct fs_instance spinor_fs_inst;
+
+static TEE_Result spinor_dirf_open(bool create, uint8_t *hash,
+				   uint32_t min_counter, const TEE_UUID *uuid,
+				   struct tee_fs_dirfile_fileh *dfh,
+				   struct tee_file_handle **fh)
+{
+	return ree_fs_open_primitive(&spinor_fs_inst, create, hash,
+				     min_counter, uuid, dfh, fh);
+}
+
+static const struct tee_fs_dirfile_operations spinor_dirf_ops = {
+	.open = spinor_dirf_open,
+	.close = ree_fs_close_primitive,
+	.read = dirf_read,
+	.write = dirf_write,
+	.commit_writes = ree_dirf_commit_writes,
+};
+
+/*
+ * The flash is only reachable from the secure world, so the normal world
+ * cannot roll it back. Protection against physical replay of an old flash
+ * image needs a rollback anchor outside the flash, which is not wired yet.
+ * As for REE FS without a monotonic counter, only an insecure
+ * configuration may mount without one.
+ */
+static TEE_Result spinor_open_dirh(struct fs_instance *fs,
+				   struct tee_fs_dirfile_dirh **dirh)
+{
+	static bool once;
+	TEE_Result res = TEE_SUCCESS;
+
+	if (!IS_ENABLED(CFG_INSECURE)) {
+		EMSG("SPI-NOR FS: no rollback anchor");
+		return TEE_ERROR_STORAGE_NOT_AVAILABLE;
+	}
+
+	if (!once) {
+		IMSG("WARNING (insecure configuration): SPI-NOR FS has no rollback anchor");
+		once = true;
+	}
+
+	res = tee_fs_dirfile_open(false, NULL, 0, fs->dirf_ops, dirh);
+	if (res == TEE_ERROR_ITEM_NOT_FOUND) {
+		DMSG("SPI-NOR FS: create dirf.db");
+		res = tee_fs_dirfile_open(true, NULL, 0, fs->dirf_ops, dirh);
+	}
+
+	return res;
+}
+
+static TEE_Result spinor_commit_dirh_writes(struct fs_instance *fs __unused,
+					    struct tee_fs_dirfile_dirh *dirh)
+{
+	return tee_fs_dirfile_commit_writes(dirh, NULL, NULL);
+}
+
+static void spinor_close_dirh(struct fs_instance *fs __unused,
+			      struct tee_fs_dirfile_dirh **dirh)
+{
+	tee_fs_dirfile_close(*dirh);
+	*dirh = NULL;
+}
+
+static struct fs_instance spinor_fs_inst = {
+	.be = &spinor_fs_backend,
+	.dirf_ops = &spinor_dirf_ops,
+	.open_dirh = spinor_open_dirh,
+	.commit_dirh_writes = spinor_commit_dirh_writes,
+	.close_dirh = spinor_close_dirh,
+	.mutex = MUTEX_INITIALIZER,
+};
+
+static TEE_Result spinor_fs_open(struct tee_pobj *po, size_t *size,
+				 struct tee_file_handle **fh)
+{
+	return fs_open(&spinor_fs_inst, po, size, fh);
+}
+
+static TEE_Result spinor_fs_create(struct tee_pobj *po, bool overwrite,
+				   const void *head, size_t head_size,
+				   const void *attr, size_t attr_size,
+				   const void *data_core,
+				   const void *data_user, size_t data_size,
+				   struct tee_file_handle **fh)
+{
+	return fs_create(&spinor_fs_inst, po, overwrite, head, head_size, attr,
+			 attr_size, data_core, data_user, data_size, fh);
+}
+
+static TEE_Result spinor_fs_rename(struct tee_pobj *old, struct tee_pobj *new,
+				   bool overwrite)
+{
+	return fs_rename(&spinor_fs_inst, old, new, overwrite);
+}
+
+static TEE_Result spinor_fs_remove(struct tee_pobj *po)
+{
+	return fs_remove(&spinor_fs_inst, po);
+}
+
+static TEE_Result spinor_fs_opendir(const TEE_UUID *uuid,
+				    struct tee_fs_dir **dir)
+{
+	return fs_opendir(&spinor_fs_inst, uuid, dir);
+}
+
+const struct tee_file_operations spinor_fs_ops = {
+	.open = spinor_fs_open,
+	.create = spinor_fs_create,
+	.close = ree_fs_close,
+	.read = ree_fs_read,
+	.write = ree_fs_write,
+	.truncate = ree_fs_truncate,
+	.rename = spinor_fs_rename,
+	.remove = spinor_fs_remove,
+	.opendir = spinor_fs_opendir,
+	.closedir = ree_fs_closedir_rpc,
+	.readdir = ree_fs_readdir_rpc,
+};
+#endif /*CFG_SPI_NOR_FS*/

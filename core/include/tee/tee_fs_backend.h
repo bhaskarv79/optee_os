@@ -42,4 +42,19 @@ struct tee_fs_backend_ops {
 	TEE_Result (*remove)(const struct tee_fs_dirfile_fileh *dfh);
 };
 
+#ifdef CFG_SPI_NOR_FS
+/* SPI-NOR flash item store, core/tee/spinor_fs_store.c */
+extern const struct tee_fs_backend_ops spinor_fs_backend;
+#endif
+
+#if defined(CFG_SPI_NOR_FS) && defined(CFG_SPI_NOR_EMBEDDED_TEST)
+/* Store format, remount, torn-record and fill tests on the simulator */
+TEE_Result spinor_fs_store_self_test(void);
+#else
+static inline TEE_Result spinor_fs_store_self_test(void)
+{
+	return TEE_SUCCESS;
+}
+#endif
+
 #endif /* __TEE_TEE_FS_BACKEND_H */

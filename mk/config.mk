@@ -245,7 +245,7 @@ CFG_RPMB_WRITE_KEY_CID ?= ""
 # how the RPMB commands are routed to simplify testing.
 CFG_RPMB_ANNOUNCE_PROBE_CAP ?= y
 
-_CFG_WITH_SECURE_STORAGE := $(call cfg-one-enabled,CFG_REE_FS CFG_RPMB_FS)
+_CFG_WITH_SECURE_STORAGE := $(call cfg-one-enabled,CFG_REE_FS CFG_RPMB_FS CFG_SPI_NOR_FS)
 
 # Signing key for OP-TEE TA's
 # When performing external HSM signing for TA's TA_SIGN_KEY can be set to dummy
@@ -1079,6 +1079,22 @@ $(eval $(call cfg-depends-all,CFG_DRIVERS_SPI_NOR,CFG_DRIVERS_SPI_MEM))
 $(eval $(call cfg-depends-all,CFG_SPI_NOR_SIM,CFG_DRIVERS_SPI_NOR))
 $(eval $(call cfg-depends-all,CFG_SPI_NOR_EMBEDDED_TEST,CFG_SPI_NOR_SIM \
 	 CFG_TEE_CORE_EMBED_INTERNAL_TESTS))
+
+# When enabled, CFG_SPI_NOR_FS provides secure storage in a region of a
+# SPI-NOR flash, with the storage ID TEE_STORAGE_PRIVATE_SPI_NOR. It is the
+# REE FS hash-tree file system on a flash backend: no normal-world access.
+# The region is CFG_SPI_NOR_FS_SIZE bytes (0: to the end of the flash) at
+# CFG_SPI_NOR_FS_OFFSET of the SPI-NOR device CFG_SPI_NOR_FS_DEVICE (probe
+# order index), and must be 4 KiB aligned. Without a rollback anchor it
+# only mounts with CFG_INSECURE=y.
+CFG_SPI_NOR_FS ?= n
+CFG_SPI_NOR_FS_DEVICE ?= 0
+CFG_SPI_NOR_FS_OFFSET ?= 0
+CFG_SPI_NOR_FS_SIZE ?= 0
+$(eval $(call cfg-depends-all,CFG_SPI_NOR_FS,CFG_DRIVERS_SPI_NOR))
+ifeq ($(CFG_SPI_NOR_FS)-$(CFG_NS_VIRTUALIZATION),y-y)
+$(error CFG_SPI_NOR_FS does not support CFG_NS_VIRTUALIZATION)
+endif
 
 # When enabled, CFG_INSECURE permits insecure configuration of OP-TEE core
 # and shows a print (info level) when booting up the device that

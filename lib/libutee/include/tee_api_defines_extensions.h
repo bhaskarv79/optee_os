@@ -123,6 +123,8 @@
 #define TEE_STORAGE_PRIVATE_RPMB 0x80000100
 /* Was TEE_STORAGE_PRIVATE_SQL, which isn't supported any longer */
 #define TEE_STORAGE_PRIVATE_SQL_RESERVED  0x80000200
+/* Storage is a region of a SPI-NOR flash owned by the secure world */
+#define TEE_STORAGE_PRIVATE_SPI_NOR	 0x80000300
 
 /*
  * Extension of "Memory Access Rights Constants"

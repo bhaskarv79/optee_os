@@ -40,10 +40,11 @@ endif #CFG_WITH_USER_TA,y
 
 srcs-$(_CFG_WITH_SECURE_STORAGE) += tee_fs_key_manager.c
 srcs-$(CFG_RPMB_FS) += tee_rpmb_fs.c
-srcs-$(CFG_REE_FS) += tee_ree_fs.c
-srcs-$(CFG_REE_FS) += fs_dirfile.c
-srcs-$(CFG_REE_FS) += fs_htree.c
+srcs-$(call cfg-one-enabled,CFG_REE_FS CFG_SPI_NOR_FS) += tee_ree_fs.c
+srcs-$(call cfg-one-enabled,CFG_REE_FS CFG_SPI_NOR_FS) += fs_dirfile.c
+srcs-$(call cfg-one-enabled,CFG_REE_FS CFG_SPI_NOR_FS) += fs_htree.c
 srcs-$(CFG_REE_FS) += tee_fs_rpc.c
+srcs-$(CFG_SPI_NOR_FS) += spinor_fs_store.c
 
 ifeq ($(call cfg-one-enabled,CFG_WITH_USER_TA _CFG_WITH_SECURE_STORAGE),y)
 srcs-y += tee_pobj.c

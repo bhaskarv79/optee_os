@@ -57,6 +57,9 @@ struct tee_file_operations {
 #ifdef CFG_REE_FS
 extern const struct tee_file_operations ree_fs_ops;
 #endif
+#ifdef CFG_SPI_NOR_FS
+extern const struct tee_file_operations spinor_fs_ops;
+#endif
 #ifdef CFG_RPMB_FS
 extern const struct tee_file_operations rpmb_fs_ops;
 
@@ -127,6 +130,10 @@ tee_svc_storage_file_ops(uint32_t storage_id)
 #ifdef CFG_RPMB_FS
 	case TEE_STORAGE_PRIVATE_RPMB:
 		return &rpmb_fs_ops;
+#endif
+#ifdef CFG_SPI_NOR_FS
+	case TEE_STORAGE_PRIVATE_SPI_NOR:
+		return &spinor_fs_ops;
 #endif
 	default:
 		return NULL;
