@@ -10,6 +10,7 @@
  */
 
 #include <drivers/spi_nor.h>
+#include <drivers/spi_nor_ns.h>
 #include <drivers/spi_nor_rpmc.h>
 #include <io.h>
 #include <libfdt.h>
@@ -586,6 +587,90 @@ static void test_rpmc(struct spi_nor *nor __unused)
 }
 #endif
 
+#ifdef CFG_SPI_NOR_NS_ACCESS
+/* Exposed partition number of partition @label, or -1 */
+static int ns_id(const char *label)
+{
+	struct spi_nor_ns_info info = { };
+	unsigned int n = 0;
+
+	for (n = 0; n < spi_nor_ns_count(); n++)
+		if (!spi_nor_ns_get_info(n, &info) &&
+		    !strcmp(info.label, label))
+			return n;
+
+	return -1;
+}
+
+static void test_ns_access(struct spi_nor *nor)
+{
+	struct spi_nor_partition *hidden = NULL;
+	struct spi_nor_partition *rw = NULL;
+	struct spi_nor_partition *ro = NULL;
+	uint8_t buf[16] = { };
+	uint8_t data[16] = { };
+	int rw_id = -1;
+	int ro_id = -1;
+
+	CHECK(!spi_nor_add_partition(nor, "st-ns-rw", 0x8000, 0x2000, &rw));
+	CHECK(!spi_nor_add_partition(nor, "st-ns-ro", 0xa000, 0x1000, &ro));
+	CHECK(!spi_nor_add_partition(nor, "st-ns-no", 0xb000, 0x1000,
+				     &hidden));
+	if (!rw || !ro || !hidden)
+		goto out;
+	rw->ns_access = SPI_NOR_NS_ACCESS_RW;
+	ro->ns_access = SPI_NOR_NS_ACCESS_RO;
+
+	rw_id = ns_id("st-ns-rw");
+	ro_id = ns_id("st-ns-ro");
+	CHECK(rw_id >= 0 && ro_id >= 0);
+	CHECK(ns_id("st-ns-no") < 0);
+	if (rw_id < 0 || ro_id < 0)
+		goto out;
+
+	/* Offsets are relative to the partition */
+	memset(data, 0x3c, sizeof(data));
+	CHECK(!spi_nor_ns_erase(rw_id, 0x1000, 0x1000));
+	CHECK(!spi_nor_ns_write(rw_id, 0x1010, data, sizeof(data)));
+	CHECK(!spi_nor_read(nor, 0x9010, buf, sizeof(buf)));
+	CHECK(!memcmp(buf, data, sizeof(data)));
+	memset(buf, 0, sizeof(buf));
+	CHECK(!spi_nor_ns_read(rw_id, 0x1010, buf, sizeof(buf)));
+	CHECK(!memcmp(buf, data, sizeof(data)));
+
+	/* Read-only: reads only */
+	CHECK(!spi_nor_ns_read(ro_id, 0, buf, sizeof(buf)));
+	CHECK(spi_nor_ns_write(ro_id, 0, data, sizeof(data)) ==
+	      TEE_ERROR_ACCESS_DENIED);
+	CHECK(spi_nor_ns_erase(ro_id, 0, 0x1000) == TEE_ERROR_ACCESS_DENIED);
+
+	/* Out of bounds, too long or misaligned */
+	CHECK(spi_nor_ns_read(rw_id, 0x2000 - 8, buf, sizeof(buf)) ==
+	      TEE_ERROR_BAD_PARAMETERS);
+	CHECK(spi_nor_ns_read(rw_id, UINT64_MAX, buf, 1) ==
+	      TEE_ERROR_BAD_PARAMETERS);
+	CHECK(spi_nor_ns_read(rw_id, 0, buf, SPI_NOR_NS_MAX_XFER + 1) ==
+	      TEE_ERROR_BAD_PARAMETERS);
+	CHECK(spi_nor_ns_erase(rw_id, 0x800, 0x1000) ==
+	      TEE_ERROR_BAD_PARAMETERS);
+	CHECK(spi_nor_ns_erase(rw_id, 0x1000, 0x2000) ==
+	      TEE_ERROR_BAD_PARAMETERS);
+	CHECK(spi_nor_ns_read(spi_nor_ns_count(), 0, buf, 1) ==
+	      TEE_ERROR_ITEM_NOT_FOUND);
+out:
+	if (rw)
+		spi_nor_del_partition(rw);
+	if (ro)
+		spi_nor_del_partition(ro);
+	if (hidden)
+		spi_nor_del_partition(hidden);
+}
+#else
+static void test_ns_access(struct spi_nor *nor __unused)
+{
+}
+#endif
+
 TEE_Result spi_nor_self_test(void)
 {
 	struct spi_nor *nor = spi_nor_sim_get();
@@ -603,6 +688,7 @@ TEE_Result spi_nor_self_test(void)
 		test_dt_partitions(nor);
 		test_gpt(nor);
 		test_rpmc(nor);
+		test_ns_access(nor);
 	}
 
 	return failures ? TEE_ERROR_GENERIC : TEE_SUCCESS;
