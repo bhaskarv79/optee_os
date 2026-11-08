@@ -1171,6 +1171,12 @@ $(call force,_CFG_SPI_NOR_FS_ANCHOR_NV_COUNTER,y)
 endif
 endif
 $(eval $(call cfg-depends-all,CFG_SPI_NOR_FS_DEFAULT,CFG_SPI_NOR_FS))
+
+# When enabled, CFG_STMM_STORAGE_SPI_NOR makes StandaloneMM keep the UEFI
+# variables in SPI-NOR FS instead of RPMB FS. It follows
+# CFG_SPI_NOR_FS_DEFAULT by default.
+CFG_STMM_STORAGE_SPI_NOR ?= $(CFG_SPI_NOR_FS_DEFAULT)
+$(eval $(call cfg-depends-all,CFG_STMM_STORAGE_SPI_NOR,CFG_SPI_NOR_FS))
 ifeq ($(CFG_SPI_NOR_FS)-$(CFG_NS_VIRTUALIZATION),y-y)
 $(error CFG_SPI_NOR_FS does not support CFG_NS_VIRTUALIZATION)
 endif

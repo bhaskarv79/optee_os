@@ -607,6 +607,13 @@ static TEE_Result sec_storage_obj_write(unsigned long storage_id, char *obj_id,
 }
 
 #define FILENAME "EFI_VARS"
+
+#ifdef CFG_STMM_STORAGE_SPI_NOR
+#define STMM_STORAGE_ID		TEE_STORAGE_PRIVATE_SPI_NOR
+#else
+#define STMM_STORAGE_ID		TEE_STORAGE_PRIVATE_RPMB
+#endif
+
 static void stmm_handle_storage_service(struct thread_scall_regs *regs)
 {
 	uint32_t flags = TEE_DATA_FLAG_ACCESS_READ |
@@ -621,14 +628,14 @@ static void stmm_handle_storage_service(struct thread_scall_regs *regs)
 	stmm_ffa_get_storage_req(regs, &req);
 	switch (req.op) {
 	case STMM_FFA_STORAGE_OP_READ:
-		DMSG("RPMB read");
-		res = sec_storage_obj_read(TEE_STORAGE_PRIVATE_RPMB, obj_id,
+		DMSG("Storage read");
+		res = sec_storage_obj_read(STMM_STORAGE_ID, obj_id,
 					   obj_id_len, req.data, req.data_len,
 					   req.offset, flags);
 		break;
 	case STMM_FFA_STORAGE_OP_WRITE:
-		DMSG("RPMB write");
-		res = sec_storage_obj_write(TEE_STORAGE_PRIVATE_RPMB, obj_id,
+		DMSG("Storage write");
+		res = sec_storage_obj_write(STMM_STORAGE_ID, obj_id,
 					    obj_id_len, req.data, req.data_len,
 					    req.offset, flags);
 		break;
