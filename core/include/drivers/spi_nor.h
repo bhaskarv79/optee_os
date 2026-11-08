@@ -209,6 +209,18 @@ spi_nor_find_partition(const char *label __unused)
  *	Tests that erase a flash must only use this one.
  */
 struct spi_nor *spi_nor_sim_get(void);
+
+/*
+ * spi_nor_sim_snapshot() - Start saving the content of the simulated flash:
+ *	each sector is saved before its first program or erase, up to 16
+ *	sectors
+ * spi_nor_sim_swap_snapshot() - Stop saving and exchange the saved sectors
+ *	with the flash, e.g. to put an old flash image back as an attacker
+ *	with an external programmer would; calling it again restores the
+ *	flash. Return TEE_ERROR_OUT_OF_MEMORY if too many sectors changed.
+ */
+void spi_nor_sim_snapshot(void);
+TEE_Result spi_nor_sim_swap_snapshot(void);
 #endif
 
 #ifdef CFG_SPI_NOR_EMBEDDED_TEST
