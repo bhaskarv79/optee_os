@@ -5,6 +5,8 @@
 
 #include <drivers/spi_nor.h>
 #include <inttypes.h>
+#include <kernel/dt.h>
+#include <libfdt.h>
 #include <malloc.h>
 #include <string.h>
 #include <sys/queue.h>
@@ -91,3 +93,87 @@ void spi_nor_del_partition(struct spi_nor_partition *part)
 	STAILQ_REMOVE(&part_list, e, part_entry, link);
 	free(e);
 }
+
+#ifdef CFG_DT
+static void del_partitions(struct spi_nor *nor)
+{
+	struct part_entry *next = NULL;
+	struct part_entry *e = NULL;
+
+	STAILQ_FOREACH_SAFE(e, &part_list, link, next)
+		if (e->part.nor == nor)
+			spi_nor_del_partition(&e->part);
+}
+
+static TEE_Result read_cells(const fdt32_t *cell, int ncells, uint64_t *val)
+{
+	if (ncells == 1)
+		*val = fdt32_to_cpu(cell[0]);
+	else if (ncells == 2)
+		*val = ((uint64_t)fdt32_to_cpu(cell[0]) << 32) |
+		       fdt32_to_cpu(cell[1]);
+	else
+		return TEE_ERROR_BAD_FORMAT;
+
+	return TEE_SUCCESS;
+}
+
+static TEE_Result add_dt_partition(struct spi_nor *nor, const void *fdt,
+				   int node, int acells, int scells)
+{
+	const fdt32_t *reg = NULL;
+	const char *label = NULL;
+	TEE_Result res = TEE_ERROR_GENERIC;
+	uint64_t offs = 0;
+	uint64_t size = 0;
+	int len = 0;
+
+	reg = fdt_getprop(fdt, node, "reg", &len);
+	if (!reg || len != (acells + scells) * (int)sizeof(*reg))
+		return TEE_ERROR_BAD_FORMAT;
+
+	res = read_cells(reg, acells, &offs);
+	if (!res)
+		res = read_cells(reg + acells, scells, &size);
+	if (res)
+		return res;
+
+	label = fdt_stringlist_get(fdt, node, "label", 0, NULL);
+	if (!label)
+		label = fdt_get_name(fdt, node, NULL);
+
+	return spi_nor_add_partition(nor, label, offs, size, NULL);
+}
+
+TEE_Result spi_nor_dt_add_partitions(struct spi_nor *nor, const void *fdt,
+				     int node)
+{
+	TEE_Result res = TEE_SUCCESS;
+	int scells = 0;
+	int acells = 0;
+	int parts = 0;
+	int child = 0;
+
+	parts = fdt_subnode_offset(fdt, node, "partitions");
+	if (parts < 0)
+		return TEE_SUCCESS;
+
+	acells = fdt_address_cells(fdt, parts);
+	scells = fdt_size_cells(fdt, parts);
+
+	fdt_for_each_subnode(child, fdt, parts) {
+		if (fdt_get_status(fdt, child) == DT_STATUS_DISABLED)
+			continue;
+
+		res = add_dt_partition(nor, fdt, child, acells, scells);
+		if (res) {
+			EMSG("SPI-NOR: bad partition node %s",
+			     fdt_get_name(fdt, child, NULL));
+			del_partitions(nor);
+			return res;
+		}
+	}
+
+	return TEE_SUCCESS;
+}
+#endif /*CFG_DT*/

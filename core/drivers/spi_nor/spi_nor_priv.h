@@ -115,4 +115,11 @@ TEE_Result spi_nor_sfdp_parse(sfdp_read_func read, void *ctx,
 TEE_Result spi_nor_ids_lookup(const uint8_t id[SPI_NOR_MAX_ID_LEN],
 			      struct spi_nor_geometry *geo);
 
+/*
+ * spi_nor_dt_add_partitions() - Add the partitions of the "partitions"
+ *	subnode of flash node @node; none are kept if one is invalid
+ */
+TEE_Result spi_nor_dt_add_partitions(struct spi_nor *nor, const void *fdt,
+				     int node);
+
 #endif /* __SPI_NOR_PRIV_H */
