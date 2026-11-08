@@ -933,17 +933,25 @@ static TEE_Result sfs_init(struct sfs *s, struct spi_nor *nor, uint64_t offs,
 	return sfs_mount(s);
 }
 
-static bool dt_declares(const void *fdt, const char *label)
+/* Enabled DT node with label @label, or a negative value */
+static int dt_find(const void *fdt, const char *label)
 {
 	int node = 0;
 
 	if (!fdt)
-		return false;
+		return -1;
 
 	node = fdt_node_offset_by_prop_value(fdt, -1, "label", label,
 					     strlen(label) + 1);
+	if (node >= 0 && fdt_get_status(fdt, node) == DT_STATUS_DISABLED)
+		return -1;
 
-	return node >= 0 && fdt_get_status(fdt, node) != DT_STATUS_DISABLED;
+	return node;
+}
+
+static bool dt_declares(const void *fdt, const char *label)
+{
+	return dt_find(fdt, label) >= 0;
 }
 
 /*
@@ -1017,6 +1025,27 @@ static TEE_Result fs_store_ready(void)
 	}
 
 	return sfs_init(&fs_store, nor, offs, size);
+}
+
+TEE_Result spinor_fs_store_get_flash(struct spi_nor **nor)
+{
+	TEE_Result res = fs_store_ready();
+
+	if (!res)
+		*nor = fs_store.nor;
+
+	return res;
+}
+
+const char *spinor_fs_store_dt_anchor(void)
+{
+	const void *fdt = get_embedded_dt();
+	int node = dt_find(fdt, SPINOR_FS_PARTITION);
+
+	if (node < 0)
+		return NULL;
+
+	return fdt_stringlist_get(fdt, node, "optee,rollback-anchor", 0, NULL);
 }
 
 static uint32_t dfh_to_file(const struct tee_fs_dirfile_fileh *dfh)

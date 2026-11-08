@@ -43,8 +43,19 @@ struct tee_fs_backend_ops {
 };
 
 #ifdef CFG_SPI_NOR_FS
+struct spi_nor;
+
 /* SPI-NOR flash item store, core/tee/spinor_fs_store.c */
 extern const struct tee_fs_backend_ops spinor_fs_backend;
+
+/* spinor_fs_store_get_flash() - Mount the store and get its flash */
+TEE_Result spinor_fs_store_get_flash(struct spi_nor **nor);
+
+/*
+ * spinor_fs_store_dt_anchor() - Value of the "optee,rollback-anchor"
+ *	property of the store partition in the secure DT, or NULL
+ */
+const char *spinor_fs_store_dt_anchor(void);
 #endif
 
 #if defined(CFG_SPI_NOR_FS) && defined(CFG_SPI_NOR_EMBEDDED_TEST)
