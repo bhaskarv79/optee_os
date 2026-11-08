@@ -1289,6 +1289,9 @@ static void st_find_region(struct spi_nor *nor, uint64_t offs_part)
 		spi_nor_del_partition(part);
 }
 
+/* The test uses at most this much of the flash after the store */
+#define ST_REGION_MAX	(128 * 1024)
+
 TEE_Result spinor_fs_store_self_test(void)
 {
 	struct spi_nor_info info = { };
@@ -1310,7 +1313,7 @@ TEE_Result spinor_fs_store_self_test(void)
 	       (CFG_SPI_NOR_FS_SIZE ? CFG_SPI_NOR_FS_SIZE :
 				      info.size - CFG_SPI_NOR_FS_OFFSET);
 	size = info.size > offs ? info.size - offs : 0;
-	size = ROUNDDOWN(size, SFS_UNIT);
+	size = ROUNDDOWN(MIN(size, (uint64_t)ST_REGION_MAX), SFS_UNIT);
 	if (size / SFS_UNIT < 16) {
 		IMSG("SPI-NOR FS store self test skipped: no spare region");
 		return TEE_SUCCESS;

@@ -480,6 +480,7 @@ struct spi_nor *spi_nor_sim_get(void)
 
 static TEE_Result spi_nor_sim_init(void)
 {
+	struct spi_nor_partition *part = NULL;
 	struct spi_nor *nor = NULL;
 	TEE_Result res = TEE_ERROR_GENERIC;
 
@@ -492,8 +493,17 @@ static TEE_Result spi_nor_sim_init(void)
 	sim.mem.tx_buswidth = 1;
 
 	res = spi_nor_probe(&sim.mem, &nor);
+	if (res)
+		return res;
+	sim_nor = nor;
+	if (!CFG_SPI_NOR_SIM_NS_SIZE)
+		return TEE_SUCCESS;
+
+	/* A partition the normal world may use, as a DT would declare */
+	res = spi_nor_add_partition(nor, "sim-ns", CFG_SPI_NOR_SIM_NS_OFFSET,
+				    CFG_SPI_NOR_SIM_NS_SIZE, &part);
 	if (!res)
-		sim_nor = nor;
+		part->ns_access = SPI_NOR_NS_ACCESS_RW;
 
 	return res;
 }
