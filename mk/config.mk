@@ -1072,18 +1072,29 @@ CFG_DRIVERS_SPI_MEM ?= n
 # (xtest 1001). They erase and program the simulated flash only.
 #
 # CFG_SPI_NOR_RPMC adds the commands of the Replay Protected Monotonic
-# Counters (RPMC) of flashes whose SFDP tables declare them.
+# Counters (RPMC) of flashes whose SFDP tables declare them, and their use
+# as monotonic counters with root keys derived from the HUK.
+#
+# CFG_RPMC_WRITE_ROOT_KEY lets OP-TEE write the root key of a counter that
+# has none. A root key can only be written once, and it is sent in clear on
+# the SPI bus, so this is meant for a provisioning build only, run in a
+# trusted environment. Product images must not enable it.
 CFG_DRIVERS_SPI_NOR ?= n
 CFG_SPI_NOR_SIM ?= n
 CFG_SPI_NOR_SIM_SIZE ?= 262144
 CFG_SPI_NOR_EMBEDDED_TEST ?= $(call cfg-all-enabled,CFG_SPI_NOR_SIM \
 				  CFG_TEE_CORE_EMBED_INTERNAL_TESTS)
 CFG_SPI_NOR_RPMC ?= n
+CFG_RPMC_WRITE_ROOT_KEY ?= n
 $(eval $(call cfg-depends-all,CFG_DRIVERS_SPI_NOR,CFG_DRIVERS_SPI_MEM))
 $(eval $(call cfg-depends-all,CFG_SPI_NOR_SIM,CFG_DRIVERS_SPI_NOR))
 $(eval $(call cfg-depends-all,CFG_SPI_NOR_EMBEDDED_TEST,CFG_SPI_NOR_SIM \
 	 CFG_TEE_CORE_EMBED_INTERNAL_TESTS))
 $(eval $(call cfg-depends-all,CFG_SPI_NOR_RPMC,CFG_DRIVERS_SPI_NOR))
+$(eval $(call cfg-depends-all,CFG_RPMC_WRITE_ROOT_KEY,CFG_SPI_NOR_RPMC))
+ifeq ($(CFG_RPMC_WRITE_ROOT_KEY),y)
+$(info WARNING: CFG_RPMC_WRITE_ROOT_KEY=y is for provisioning builds only)
+endif
 
 # When enabled, CFG_SPI_NOR_FS provides secure storage in a region of a
 # SPI-NOR flash, with the storage ID TEE_STORAGE_PRIVATE_SPI_NOR. It is the

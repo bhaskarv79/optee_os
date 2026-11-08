@@ -111,10 +111,59 @@ TEE_Result spi_nor_rpmc_read(struct spi_nor *nor, unsigned int ctr,
 TEE_Result spi_nor_rpmc_increment(struct spi_nor *nor, unsigned int ctr,
 				  const uint8_t hmac_key[SPI_NOR_RPMC_KEY_SIZE],
 				  uint32_t cur);
+
+/**
+ * spi_nor_rpmc_counter_get() - Read an RPMC counter used as a monotonic
+ *	counter of this device
+ *
+ * @nor: SPI-NOR device
+ * @ctr: Counter index
+ * @value: Output counter value
+ *
+ * The first call for a counter after boot starts a session with a root
+ * key derived from the HUK. With CFG_RPMC_WRITE_ROOT_KEY, an unprovisioned
+ * counter gets its root key written.
+ *
+ * Return TEE_SUCCESS on success
+ * Return TEE_ERROR_NOT_SUPPORTED if the flash has no such counter
+ * Return TEE_ERROR_BAD_STATE if the counter is not provisioned for this
+ *	device
+ * Return TEE_ERROR_SECURITY if a reply is not authentic
+ * Return another TEE_Result compliant code on error
+ */
+TEE_Result spi_nor_rpmc_counter_get(struct spi_nor *nor, unsigned int ctr,
+				    uint32_t *value);
+
+/**
+ * spi_nor_rpmc_counter_incr_to() - Raise an RPMC counter to a value
+ *
+ * @nor: SPI-NOR device
+ * @ctr: Counter index
+ * @value: Target value; nothing is done if the counter is not below it
+ *
+ * Return codes as for spi_nor_rpmc_counter_get()
+ */
+TEE_Result spi_nor_rpmc_counter_incr_to(struct spi_nor *nor, unsigned int ctr,
+					uint32_t value);
 #else
 static inline unsigned int spi_nor_rpmc_counters(struct spi_nor *nor __unused)
 {
 	return 0;
+}
+
+static inline TEE_Result
+spi_nor_rpmc_counter_get(struct spi_nor *nor __unused,
+			 unsigned int ctr __unused, uint32_t *value __unused)
+{
+	return TEE_ERROR_NOT_SUPPORTED;
+}
+
+static inline TEE_Result
+spi_nor_rpmc_counter_incr_to(struct spi_nor *nor __unused,
+			     unsigned int ctr __unused,
+			     uint32_t value __unused)
+{
+	return TEE_ERROR_NOT_SUPPORTED;
 }
 #endif /* CFG_SPI_NOR_RPMC */
 
