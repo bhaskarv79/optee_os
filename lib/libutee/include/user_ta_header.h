@@ -33,17 +33,19 @@
 	 * The flags below control at which stage a TA will be enumerated:
 	 * TA_FLAG_DEVICE_ENUM - at stage 1
 	 * TA_FLAG_DEVICE_ENUM_TEE_STORAGE_PRIVATE -
-	 *      when secure storage is available, at stage 2 or 3 depending
-	 *      on whether TEE_STORAGE_PRIVATE is using RPMB FS
-	 *      (CFG_REE_FS=n CFG_RPMB_FS=y) or REE FS (CFG_REE_FS=y). The
-	 *      former utilizes in kernel RPMB routing, and the latter
-	 *      depends on tee-supplicant to access secure storage.
+	 *      when secure storage is available, at stage 1, 2 or 3
+	 *      depending on whether TEE_STORAGE_PRIVATE is using SPI-NOR FS
+	 *      (CFG_SPI_NOR_FS_DEFAULT=y), RPMB FS (CFG_REE_FS=n
+	 *      CFG_RPMB_FS=y) or REE FS (CFG_REE_FS=y). SPI-NOR FS needs no
+	 *      normal-world help, RPMB FS utilizes in kernel RPMB routing,
+	 *      and REE FS depends on tee-supplicant to access secure
+	 *      storage.
 	 * TA_FLAG_DEVICE_ENUM_SUPP - at stage 3
 	 *
-	 * The TA is enumerated at stage 2 if
+	 * The TA is enumerated at stage 1 if
 	 * TA_FLAG_DEVICE_ENUM_TEE_STORAGE_PRIVATE is set and
-	 * TEE_STORAGE_PRIVATE is using RPMB FS, or if it's using REE FS it
-	 * will be enumerated at stage 3.
+	 * TEE_STORAGE_PRIVATE is using SPI-NOR FS, at stage 2 if it's using
+	 * RPMB FS, or at stage 3 if it's using REE FS.
 	 */
 #define TA_FLAG_DEVICE_ENUM		BIT32(9)  /* without tee-supplicant */
 #define TA_FLAG_DEVICE_ENUM_SUPP	BIT32(10) /* with tee-supplicant */

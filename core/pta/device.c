@@ -93,15 +93,20 @@ static TEE_Result invoke_command(void *pSessionContext __unused,
 	 * enabled when the kernel does not support OP-TEE RPMB operations.
 	 */
 	bool rpmb_needs_supp = !IS_ENABLED(CFG_RPMB_ANNOUNCE_PROBE_CAP);
+	/* SPI-NOR FS needs neither tee-supplicant nor RPMB routing */
+	bool private_is_spinor = IS_ENABLED(CFG_SPI_NOR_FS_DEFAULT);
 
 	switch (nCommandID) {
 	case PTA_CMD_GET_DEVICES:
 		rflags = TA_FLAG_DEVICE_ENUM;
+		if (private_is_spinor)
+			rflags |= TA_FLAG_DEVICE_ENUM_TEE_STORAGE_PRIVATE;
 		break;
 	case PTA_CMD_GET_DEVICES_SUPP:
 		rflags = TA_FLAG_DEVICE_ENUM_SUPP;
-		if (IS_ENABLED(CFG_REE_FS) ||
-		    (IS_ENABLED(CFG_RPMB_FS) && rpmb_needs_supp))
+		if (!private_is_spinor &&
+		    (IS_ENABLED(CFG_REE_FS) ||
+		     (IS_ENABLED(CFG_RPMB_FS) && rpmb_needs_supp)))
 			rflags |= TA_FLAG_DEVICE_ENUM_TEE_STORAGE_PRIVATE;
 		break;
 	case PTA_CMD_GET_DEVICES_RPMB:
@@ -123,6 +128,7 @@ static TEE_Result invoke_command(void *pSessionContext __unused,
 		 *   - REE FS enabled: it maps to REE FS, already announced on
 		 *     the SUPP path; announcing them here too would enumerate
 		 *     the same device twice, so rflags stays 0.
+		 *   - SPI-NOR FS: already announced on the first call.
 		 */
 		if (!IS_ENABLED(CFG_RPMB_FS))
 			break;
@@ -131,7 +137,7 @@ static TEE_Result invoke_command(void *pSessionContext __unused,
 		if (res)
 			return TEE_ERROR_STORAGE_NOT_AVAILABLE;
 
-		if (!IS_ENABLED(CFG_REE_FS))
+		if (!IS_ENABLED(CFG_REE_FS) && !private_is_spinor)
 			rflags = TA_FLAG_DEVICE_ENUM_TEE_STORAGE_PRIVATE;
 
 		break;
