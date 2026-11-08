@@ -17,7 +17,8 @@
  * signature: with the root key for Write Root Key (truncated to its last
  * 28 bytes), with the session key otherwise, including Update HMAC Key,
  * which is signed with the new session key HMAC-SHA256(root key, key
- * data).
+ * data). A reply is signed with the session key over the tag and the
+ * counter.
  */
 
 #include <crypto/crypto.h>
@@ -245,4 +246,99 @@ spi_nor_rpmc_update_hmac_key(struct spi_nor *nor, unsigned int ctr,
 		memzero_explicit(hmac_key, SPI_NOR_RPMC_KEY_SIZE);
 
 	return res;
+}
+
+/* Request the counter and read the signed reply. Called with nor->lock */
+static TEE_Result read_locked(struct spi_nor *nor, unsigned int ctr,
+			      const uint8_t hmac_key[SPI_NOR_RPMC_KEY_SIZE],
+			      uint32_t *value)
+{
+	uint8_t pkt[RPMC_HDR_SIZE + RPMC_TAG_SIZE + RPMC_SIG_SIZE] = { };
+	uint8_t reply[RPMC_REPLY_SIZE] = { };
+	uint8_t sig[RPMC_SIG_SIZE] = { };
+	uint8_t *tag = pkt + RPMC_HDR_SIZE;
+	TEE_Result res = TEE_ERROR_GENERIC;
+
+	set_hdr(nor, pkt, RPMC_CMD_REQUEST, ctr);
+	res = crypto_rng_read(tag, RPMC_TAG_SIZE);
+	if (!res)
+		res = hmac(hmac_key, pkt, RPMC_HDR_SIZE + RPMC_TAG_SIZE,
+			   pkt + RPMC_HDR_SIZE + RPMC_TAG_SIZE);
+	if (!res)
+		res = op1_exec(nor, pkt, sizeof(pkt));
+	if (!res)
+		res = op2_read(nor, reply, sizeof(reply));
+	if (res)
+		return res;
+
+	res = hmac(hmac_key, reply + 1, RPMC_TAG_SIZE + RPMC_CTR_SIZE, sig);
+	if (res)
+		return res;
+
+	if (reply[0] != RPMC_STATUS_OK ||
+	    consttime_memcmp(reply + 1, tag, RPMC_TAG_SIZE) ||
+	    consttime_memcmp(reply + 1 + RPMC_TAG_SIZE + RPMC_CTR_SIZE, sig,
+			     RPMC_SIG_SIZE)) {
+		EMSG("RPMC: bad reply for counter %u", ctr);
+		return TEE_ERROR_SECURITY;
+	}
+
+	*value = get_be32(reply + 1 + RPMC_TAG_SIZE);
+
+	return TEE_SUCCESS;
+}
+
+TEE_Result spi_nor_rpmc_read(struct spi_nor *nor, unsigned int ctr,
+			     const uint8_t hmac_key[SPI_NOR_RPMC_KEY_SIZE],
+			     uint32_t *value)
+{
+	TEE_Result res = TEE_ERROR_GENERIC;
+
+	res = check_ctr(nor, ctr);
+	if (res)
+		return res;
+
+	mutex_lock(&nor->lock);
+	res = read_locked(nor, ctr, hmac_key, value);
+	mutex_unlock(&nor->lock);
+
+	return res;
+}
+
+TEE_Result spi_nor_rpmc_increment(struct spi_nor *nor, unsigned int ctr,
+				  const uint8_t hmac_key[SPI_NOR_RPMC_KEY_SIZE],
+				  uint32_t cur)
+{
+	uint8_t pkt[RPMC_HDR_SIZE + RPMC_CTR_SIZE + RPMC_SIG_SIZE] = { };
+	TEE_Result res = TEE_ERROR_GENERIC;
+	uint32_t val = 0;
+
+	res = check_ctr(nor, ctr);
+	if (res)
+		return res;
+	if (cur == UINT32_MAX)
+		return TEE_ERROR_OVERFLOW;
+
+	set_hdr(nor, pkt, RPMC_CMD_INCREMENT, ctr);
+	put_be32(pkt + RPMC_HDR_SIZE, cur);
+	res = hmac(hmac_key, pkt, RPMC_HDR_SIZE + RPMC_CTR_SIZE,
+		   pkt + RPMC_HDR_SIZE + RPMC_CTR_SIZE);
+	if (res)
+		return res;
+
+	mutex_lock(&nor->lock);
+	res = op1_exec(nor, pkt, sizeof(pkt));
+	if (!res)
+		res = read_locked(nor, ctr, hmac_key, &val);
+	mutex_unlock(&nor->lock);
+	if (res)
+		return res;
+
+	if (val != cur + 1) {
+		EMSG("RPMC: counter %u is %"PRIu32", expected %"PRIu32, ctr,
+		     val, cur + 1);
+		return TEE_ERROR_SECURITY;
+	}
+
+	return TEE_SUCCESS;
 }
