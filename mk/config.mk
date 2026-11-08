@@ -1083,10 +1083,12 @@ $(eval $(call cfg-depends-all,CFG_SPI_NOR_EMBEDDED_TEST,CFG_SPI_NOR_SIM \
 # When enabled, CFG_SPI_NOR_FS provides secure storage in a region of a
 # SPI-NOR flash, with the storage ID TEE_STORAGE_PRIVATE_SPI_NOR. It is the
 # REE FS hash-tree file system on a flash backend: no normal-world access.
-# The region is CFG_SPI_NOR_FS_SIZE bytes (0: to the end of the flash) at
-# CFG_SPI_NOR_FS_OFFSET of the SPI-NOR device CFG_SPI_NOR_FS_DEVICE (probe
-# order index), and must be 4 KiB aligned. Without a rollback anchor it
-# only mounts with CFG_INSECURE=y.
+# The region is the flash partition labelled "optee-fs" in the secure DT. If
+# the DT declares it but the flash does not probe, the storage is not
+# available. Without such a partition, the region is CFG_SPI_NOR_FS_SIZE
+# bytes (0: to the end of the flash) at CFG_SPI_NOR_FS_OFFSET of the SPI-NOR
+# device CFG_SPI_NOR_FS_DEVICE (probe order index). It must be 4 KiB
+# aligned. Without a rollback anchor it only mounts with CFG_INSECURE=y.
 CFG_SPI_NOR_FS ?= n
 CFG_SPI_NOR_FS_DEVICE ?= 0
 CFG_SPI_NOR_FS_OFFSET ?= 0
