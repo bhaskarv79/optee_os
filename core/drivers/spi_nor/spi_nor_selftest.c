@@ -30,8 +30,12 @@ static void check(bool cond, const char *what, int line)
 
 #define CHECK(cond)	check((cond), #cond, __LINE__)
 
+/* Header, two parameter headers, BFPT at 0x20, RPMC table at 0x60 */
+#define IMG_BFPT	0x20
+#define IMG_RPMC	0x60
+
 struct sfdp_image {
-	uint8_t data[0x10 + 16 * 4];
+	uint8_t data[IMG_RPMC + 2 * 4];
 };
 
 static TEE_Result image_read(void *ctx, uint32_t addr, void *buf, size_t len)
@@ -49,20 +53,32 @@ static TEE_Result image_read(void *ctx, uint32_t addr, void *buf, size_t len)
 /* 8 MiB, 4 KiB and 64 KiB erase, 256-byte pages, 3 or 4-byte addresses */
 static void make_image(struct sfdp_image *img, uint8_t bfpt_dwords)
 {
-	uint8_t *bfpt = img->data + 0x10;
+	uint8_t *bfpt = img->data + IMG_BFPT;
 
 	memset(img, 0, sizeof(*img));
 	put_le32(img->data, 0x50444653);
 	img->data[5] = 1;
 	img->data[7] = 0xff;
 	img->data[11] = bfpt_dwords;
-	img->data[12] = 0x10;
+	img->data[12] = IMG_BFPT;
 	img->data[15] = 0xff;
 
 	put_le32(bfpt, 0x1 | (0x20 << 8) | (0x1 << 17));
 	put_le32(bfpt + 4, 8 * 1024 * 1024 * 8 - 1);
 	put_le32(bfpt + 7 * 4, 16 | (0xd8 << 8) | (12 << 16) | (0x20 << 24));
 	put_le32(bfpt + 10 * 4, 8 << 4);
+}
+
+/* Add an RPMC Parameter Table with dword 1 @dw1 */
+static void add_rpmc(struct sfdp_image *img, uint32_t dw1)
+{
+	img->data[6] = 1;
+	img->data[16] = 0x03;
+	img->data[18] = 1;
+	img->data[19] = 2;
+	img->data[20] = IMG_RPMC;
+	img->data[23] = 0xff;
+	put_le32(img->data + IMG_RPMC, dw1);
 }
 
 static void test_sfdp(void)
@@ -96,10 +112,33 @@ static void test_sfdp(void)
 
 	/* No erase type and no 4 KiB erase in dword 1 */
 	make_image(&img, 16);
-	put_le32(img.data + 0x10, 0);
-	put_le32(img.data + 0x10 + 7 * 4, 0);
+	put_le32(img.data + IMG_BFPT, 0);
+	put_le32(img.data + IMG_BFPT + 7 * 4, 0);
 	CHECK(spi_nor_sfdp_parse(image_read, &img, &geo) ==
 	      TEE_ERROR_BAD_FORMAT);
+
+	/* No RPMC table */
+	make_image(&img, 16);
+	CHECK(!spi_nor_sfdp_parse(image_read, &img, &geo));
+	CHECK(!geo.rpmc.num_counters);
+
+	/* Four counters, OP1 0x9b, OP2 0x96, busy polled with OP2 */
+	add_rpmc(&img, (3 << 4) | (0x9b << 8) | (0x96 << 16));
+	CHECK(!spi_nor_sfdp_parse(image_read, &img, &geo));
+	CHECK(geo.rpmc.num_counters == 4);
+	CHECK(geo.rpmc.op1 == 0x9b && geo.rpmc.op2 == 0x96);
+	CHECK(geo.rpmc.poll_op2);
+
+	/* QEMU w25r128jv model: counter-size bit and reserved bits set */
+	add_rpmc(&img, 0xf0969b3a);
+	CHECK(!spi_nor_sfdp_parse(image_read, &img, &geo));
+	CHECK(geo.rpmc.num_counters == 4 && geo.rpmc.poll_op2);
+	CHECK(geo.rpmc.op1 == 0x9b && geo.rpmc.op2 == 0x96);
+
+	/* No flash hardening: RPMC is not used, the flash still is */
+	add_rpmc(&img, 1 | (3 << 4) | (0x9b << 8) | (0x96 << 16));
+	CHECK(!spi_nor_sfdp_parse(image_read, &img, &geo));
+	CHECK(!geo.rpmc.num_counters);
 }
 
 static bool all_bytes(const uint8_t *buf, size_t len, uint8_t val)
