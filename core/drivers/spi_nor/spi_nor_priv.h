@@ -153,4 +153,19 @@ TEE_Result spi_nor_gpt_add(struct spi_nor *nor, spi_nor_gpt_read_func read,
 /* spi_nor_gpt_crc32() - CRC32 of GPT headers and entry arrays */
 uint32_t spi_nor_gpt_crc32(const void *buf, size_t len);
 
+/*
+ * enum spi_nor_sim_rpmc_fault - Fault the simulator injects in the reply
+ *	to the next RPMC command, for tests
+ * @SPI_NOR_SIM_RPMC_NO_FAULT: None
+ * @SPI_NOR_SIM_RPMC_BAD_SIG: Corrupt the signature
+ * @SPI_NOR_SIM_RPMC_REPLAY: Return the previous counter reply
+ */
+enum spi_nor_sim_rpmc_fault {
+	SPI_NOR_SIM_RPMC_NO_FAULT,
+	SPI_NOR_SIM_RPMC_BAD_SIG,
+	SPI_NOR_SIM_RPMC_REPLAY,
+};
+
+void spi_nor_sim_rpmc_fault(enum spi_nor_sim_rpmc_fault fault);
+
 #endif /* __SPI_NOR_PRIV_H */
