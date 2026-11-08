@@ -406,14 +406,17 @@ TEE_Result spi_nor_probe(struct spi_mem *mem, struct spi_nor **out_nor)
 }
 
 #ifdef CFG_DT
-static TEE_Result spi_nor_dt_probe(struct spi_mem *mem,
-				   const void *fdt __unused,
-				   int node __unused,
-				   const void *compat_data __unused)
+static TEE_Result spi_nor_dt_probe(struct spi_mem *mem, const void *fdt,
+				   int node, const void *compat_data __unused)
 {
 	struct spi_nor *nor = NULL;
+	TEE_Result res = TEE_ERROR_GENERIC;
 
-	return spi_nor_probe(mem, &nor);
+	res = spi_nor_probe(mem, &nor);
+	if (res)
+		return res;
+
+	return spi_nor_dt_add_partitions(nor, fdt, node);
 }
 
 static const struct dt_device_match spi_nor_match_table[] = {

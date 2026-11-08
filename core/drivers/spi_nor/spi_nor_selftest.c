@@ -11,6 +11,8 @@
 
 #include <drivers/spi_nor.h>
 #include <io.h>
+#include <libfdt.h>
+#include <malloc.h>
 #include <string.h>
 #include <tee_api_types.h>
 #include <trace.h>
@@ -197,6 +199,99 @@ static void test_partitions(struct spi_nor *nor)
 	CHECK(!spi_nor_find_partition("st-b"));
 }
 
+#ifdef CFG_DT
+static void *make_dt(bool overlap)
+{
+	const size_t sz = 1024;
+	void *fdt = malloc(sz);
+	bool ok = false;
+
+	if (!fdt)
+		return NULL;
+
+	ok = !fdt_create(fdt, sz) && !fdt_finish_reservemap(fdt) &&
+	     !fdt_begin_node(fdt, "") && !fdt_begin_node(fdt, "flash@0") &&
+	     !fdt_begin_node(fdt, "partitions") &&
+	     !fdt_property_u32(fdt, "#address-cells", 1) &&
+	     !fdt_property_u32(fdt, "#size-cells", 1);
+	if (ok) {
+		/* Labelled partition */
+		fdt32_t reg_a[] = { cpu_to_fdt32(0x4000),
+				    cpu_to_fdt32(0x2000) };
+		/* No label: the node name is used */
+		fdt32_t reg_b[] = { cpu_to_fdt32(0x6000),
+				    cpu_to_fdt32(0x1000) };
+		/* Disabled, so ignored even though it overlaps */
+		fdt32_t reg_c[] = { cpu_to_fdt32(0x4000),
+				    cpu_to_fdt32(0x1000) };
+
+		if (overlap)
+			reg_b[0] = cpu_to_fdt32(0x5000);
+
+		ok = !fdt_begin_node(fdt, "partition@4000") &&
+		     !fdt_property_string(fdt, "label", "st-dt-a") &&
+		     !fdt_property(fdt, "reg", reg_a, sizeof(reg_a)) &&
+		     !fdt_end_node(fdt) &&
+		     !fdt_begin_node(fdt, "st-dt-b") &&
+		     !fdt_property(fdt, "reg", reg_b, sizeof(reg_b)) &&
+		     !fdt_end_node(fdt) &&
+		     !fdt_begin_node(fdt, "st-dt-c") &&
+		     !fdt_property_string(fdt, "status", "disabled") &&
+		     !fdt_property(fdt, "reg", reg_c, sizeof(reg_c)) &&
+		     !fdt_end_node(fdt) &&
+		     !fdt_end_node(fdt) && !fdt_end_node(fdt) &&
+		     !fdt_end_node(fdt) && !fdt_finish(fdt);
+	}
+	if (!ok) {
+		free(fdt);
+		return NULL;
+	}
+
+	return fdt;
+}
+
+static void test_dt_partitions(struct spi_nor *nor)
+{
+	struct spi_nor_partition *a = NULL;
+	struct spi_nor_partition *b = NULL;
+	void *fdt = NULL;
+	int node = 0;
+
+	fdt = make_dt(false);
+	CHECK(fdt);
+	if (!fdt)
+		return;
+	node = fdt_path_offset(fdt, "/flash@0");
+	CHECK(!spi_nor_dt_add_partitions(nor, fdt, node));
+	a = spi_nor_find_partition("st-dt-a");
+	b = spi_nor_find_partition("st-dt-b");
+	CHECK(a && a->offs == 0x4000 && a->size == 0x2000);
+	CHECK(b && b->offs == 0x6000 && b->size == 0x1000);
+	CHECK(!spi_nor_find_partition("st-dt-c"));
+	if (a)
+		spi_nor_del_partition(a);
+	if (b)
+		spi_nor_del_partition(b);
+	free(fdt);
+
+	/* One bad partition: none is kept */
+	fdt = make_dt(true);
+	CHECK(fdt);
+	if (!fdt)
+		return;
+	node = fdt_path_offset(fdt, "/flash@0");
+	CHECK(spi_nor_dt_add_partitions(nor, fdt, node) ==
+	      TEE_ERROR_BAD_PARAMETERS);
+	CHECK(!spi_nor_find_partition("st-dt-a"));
+	CHECK(!spi_nor_find_partition("st-dt-b"));
+	free(fdt);
+}
+#else
+static void test_dt_partitions(struct spi_nor *nor __unused)
+{
+}
+#endif
+
 TEE_Result spi_nor_self_test(void)
 {
 	struct spi_nor *nor = spi_nor_sim_get();
@@ -211,6 +306,7 @@ TEE_Result spi_nor_self_test(void)
 	} else {
 		test_nor(nor);
 		test_partitions(nor);
+		test_dt_partitions(nor);
 	}
 
 	return failures ? TEE_ERROR_GENERIC : TEE_SUCCESS;
