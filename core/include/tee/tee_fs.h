@@ -108,15 +108,17 @@ static inline void rpmb_fs_request_reset(void)
 
 /*
  * Returns the appropriate tee_file_operations for the specified storage ID.
- * The value TEE_STORAGE_PRIVATE will select the REE FS if available, otherwise
- * RPMB.
+ * The value TEE_STORAGE_PRIVATE will select the SPI-NOR FS with
+ * CFG_SPI_NOR_FS_DEFAULT, else the REE FS if available, otherwise RPMB.
  */
 static inline const struct tee_file_operations *
 tee_svc_storage_file_ops(uint32_t storage_id)
 {
 	switch (storage_id) {
 	case TEE_STORAGE_PRIVATE:
-#if defined(CFG_REE_FS)
+#if defined(CFG_SPI_NOR_FS_DEFAULT)
+		return &spinor_fs_ops;
+#elif defined(CFG_REE_FS)
 		return &ree_fs_ops;
 #elif defined(CFG_RPMB_FS)
 		return &rpmb_fs_ops;
