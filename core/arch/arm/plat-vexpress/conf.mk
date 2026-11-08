@@ -196,6 +196,20 @@ CFG_DT_DRIVER_EMBEDDED_TEST ?= y
 ifeq ($(CFG_DT_DRIVER_EMBEDDED_TEST),y)
 $(call force,CFG_EMBED_DTB_SOURCE_FILE,embedded_dtb_test.dts,Mandated for DT tests)
 endif
+
+# CFG_QEMU_SPI_NOR drives the secure SPI-NOR flash of QEMU run with
+# "-machine virt,secure=on,spi=secure": a PL022 with a 16 MiB RPMC capable
+# flash, whose content and RPMC state can be kept in "-drive if=mtd" images
+# (index 0 and 1). Partition "optee-fs" holds SPI-NOR FS.
+CFG_QEMU_SPI_NOR ?= n
+ifeq ($(CFG_QEMU_SPI_NOR),y)
+$(call force,CFG_PL022,y)
+$(call force,CFG_PL061,y)
+$(call force,CFG_DRIVERS_SPI_MEM,y)
+$(call force,CFG_DRIVERS_SPI_NOR,y)
+CFG_QEMU_SPI_NOR_FS_OFFSET ?= 0x400000
+CFG_QEMU_SPI_NOR_FS_SIZE ?= 0x100000
+endif
 endif
 
 CFG_PKCS11_TA ?= y
