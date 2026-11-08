@@ -1111,12 +1111,42 @@ endif
 # available. Without such a partition, the region is CFG_SPI_NOR_FS_SIZE
 # bytes (0: to the end of the flash) at CFG_SPI_NOR_FS_OFFSET of the SPI-NOR
 # device CFG_SPI_NOR_FS_DEVICE (probe order index). It must be 4 KiB
-# aligned. Without a rollback anchor it only mounts with CFG_INSECURE=y.
+# aligned.
+#
+# CFG_SPI_NOR_FS_ANCHOR selects the rollback anchor, a counter outside the
+# flash that detects the replay of an older flash image:
+# - auto: RPMC counter CFG_SPI_NOR_FS_RPMC_COUNTER of the flash if it has
+#   one with a root key, else the platform counter of
+#   nv_counter_get_spinor_fs(), else none, only with CFG_INSECURE=y;
+# - rpmc: the RPMC counter only;
+# - nv_counter: the platform counter only.
+# The "optee,rollback-anchor" property ("auto", "rpmc" or "nv-counter") of
+# the partition in the secure DT overrides it. Products exposed to physical
+# attacks should not use auto: swapping in a flash without RPMC would select
+# a weaker anchor.
+#
+# CFG_SPI_NOR_FS_ALLOW_RESET lets SPI-NOR FS start empty when dirf.db is
+# missing while the anchor is not zero, as CFG_REE_FS_ALLOW_RESET does.
 CFG_SPI_NOR_FS ?= n
 CFG_SPI_NOR_FS_DEVICE ?= 0
 CFG_SPI_NOR_FS_OFFSET ?= 0
 CFG_SPI_NOR_FS_SIZE ?= 0
+CFG_SPI_NOR_FS_ANCHOR ?= auto
+CFG_SPI_NOR_FS_RPMC_COUNTER ?= 0
+CFG_SPI_NOR_FS_ALLOW_RESET ?= n
 $(eval $(call cfg-depends-all,CFG_SPI_NOR_FS,CFG_DRIVERS_SPI_NOR))
+ifeq ($(CFG_SPI_NOR_FS),y)
+$(call cfg-check-value,SPI_NOR_FS_ANCHOR,auto rpmc nv_counter)
+ifeq ($(CFG_SPI_NOR_FS_ANCHOR),rpmc)
+ifneq ($(CFG_SPI_NOR_RPMC),y)
+$(error CFG_SPI_NOR_FS_ANCHOR=rpmc requires CFG_SPI_NOR_RPMC=y)
+endif
+$(call force,_CFG_SPI_NOR_FS_ANCHOR_RPMC,y)
+endif
+ifeq ($(CFG_SPI_NOR_FS_ANCHOR),nv_counter)
+$(call force,_CFG_SPI_NOR_FS_ANCHOR_NV_COUNTER,y)
+endif
+endif
 ifeq ($(CFG_SPI_NOR_FS)-$(CFG_NS_VIRTUALIZATION),y-y)
 $(error CFG_SPI_NOR_FS does not support CFG_NS_VIRTUALIZATION)
 endif

@@ -5,6 +5,8 @@
 
 #include <assert.h>
 #include <config.h>
+#include <drivers/spi_nor_rpmc.h>
+#include <inttypes.h>
 #include <kernel/mutex.h>
 #include <kernel/nv_counter.h>
 #include <kernel/panic.h>
@@ -1345,41 +1347,204 @@ static const struct tee_fs_dirfile_operations spinor_dirf_ops = {
 };
 
 /*
+ * Rollback anchor of SPI-NOR FS
+ *
  * The flash is only reachable from the secure world, so the normal world
- * cannot roll it back. Protection against physical replay of an old flash
- * image needs a rollback anchor outside the flash, which is not wired yet.
- * As for REE FS without a monotonic counter, only an insecure
- * configuration may mount without one.
+ * cannot roll it back, but a physical attacker can reprogram it with an
+ * older image. The anchor is a counter outside the flash that can only
+ * increase; dirf.db must carry a counter at least as high to mount, and
+ * each commit raises the anchor to the new dirf.db counter, as for REE FS
+ * with nv_counter_*_ree_fs().
+ *
+ * The anchor is an RPMC counter of the flash if it has one that is
+ * provisioned, else the platform counter behind nv_counter_*_spinor_fs().
+ * Without either, only an insecure configuration mounts. The policy comes
+ * from CFG_SPI_NOR_FS_ANCHOR or the "optee,rollback-anchor" property of
+ * the partition in the secure DT: "auto", "rpmc" or "nv-counter".
  */
-static TEE_Result spinor_open_dirh(struct fs_instance *fs,
-				   struct tee_fs_dirfile_dirh **dirh)
-{
-	static bool once;
-	TEE_Result res = TEE_SUCCESS;
+enum spinor_anchor {
+	SPINOR_ANCHOR_UNSET,
+	SPINOR_ANCHOR_NONE,
+	SPINOR_ANCHOR_RPMC,
+	SPINOR_ANCHOR_NV_COUNTER,
+};
 
-	if (!IS_ENABLED(CFG_INSECURE)) {
-		EMSG("SPI-NOR FS: no rollback anchor");
+enum spinor_anchor_policy {
+	SPINOR_POLICY_AUTO,
+	SPINOR_POLICY_RPMC,
+	SPINOR_POLICY_NV_COUNTER,
+};
+
+/* CFG_SPI_NOR_FS_ANCHOR */
+#if defined(_CFG_SPI_NOR_FS_ANCHOR_RPMC)
+#define SPINOR_BUILD_POLICY	SPINOR_POLICY_RPMC
+#elif defined(_CFG_SPI_NOR_FS_ANCHOR_NV_COUNTER)
+#define SPINOR_BUILD_POLICY	SPINOR_POLICY_NV_COUNTER
+#else
+#define SPINOR_BUILD_POLICY	SPINOR_POLICY_AUTO
+#endif
+
+static enum spinor_anchor spinor_anchor;
+static struct spi_nor *spinor_anchor_nor;
+
+static TEE_Result spinor_anchor_policy(enum spinor_anchor_policy *policy)
+{
+	const char *dt = spinor_fs_store_dt_anchor();
+
+	if (!dt) {
+		*policy = SPINOR_BUILD_POLICY;
+	} else if (!strcmp(dt, "auto")) {
+		*policy = SPINOR_POLICY_AUTO;
+	} else if (!strcmp(dt, "rpmc")) {
+		*policy = SPINOR_POLICY_RPMC;
+	} else if (!strcmp(dt, "nv-counter")) {
+		*policy = SPINOR_POLICY_NV_COUNTER;
+	} else {
+		EMSG("SPI-NOR FS: bad optee,rollback-anchor \"%s\"", dt);
+		return TEE_ERROR_BAD_FORMAT;
+	}
+
+	return TEE_SUCCESS;
+}
+
+/* Use the RPMC counter if the flash has it and it is provisioned */
+static TEE_Result spinor_try_rpmc(void)
+{
+	TEE_Result res = TEE_ERROR_GENERIC;
+	struct spi_nor *nor = NULL;
+	uint32_t val = 0;
+
+	res = spinor_fs_store_get_flash(&nor);
+	if (res)
+		return res;
+
+	res = spi_nor_rpmc_counter_get(nor, CFG_SPI_NOR_FS_RPMC_COUNTER, &val);
+	if (res)
+		return res;
+
+	spinor_anchor_nor = nor;
+	spinor_anchor = SPINOR_ANCHOR_RPMC;
+	DMSG("SPI-NOR FS: RPMC counter %d anchors the file system",
+	     CFG_SPI_NOR_FS_RPMC_COUNTER);
+
+	return TEE_SUCCESS;
+}
+
+static TEE_Result spinor_select_anchor(void)
+{
+	enum spinor_anchor_policy policy = SPINOR_POLICY_AUTO;
+	TEE_Result res = TEE_ERROR_GENERIC;
+	uint32_t val = 0;
+
+	if (spinor_anchor != SPINOR_ANCHOR_UNSET)
+		return TEE_SUCCESS;
+
+	res = spinor_anchor_policy(&policy);
+	if (res)
+		return res;
+
+	if (policy != SPINOR_POLICY_NV_COUNTER) {
+		res = spinor_try_rpmc();
+		if (!res)
+			return TEE_SUCCESS;
+		/* Never trade a counter that misbehaves for a weaker anchor */
+		if (policy == SPINOR_POLICY_RPMC ||
+		    (res != TEE_ERROR_NOT_SUPPORTED &&
+		     res != TEE_ERROR_BAD_STATE)) {
+			EMSG("SPI-NOR FS: no RPMC anchor: %#"PRIx32, res);
+			return TEE_ERROR_STORAGE_NOT_AVAILABLE;
+		}
+	}
+
+	res = nv_counter_get_spinor_fs(&val);
+	if (!res) {
+		spinor_anchor = SPINOR_ANCHOR_NV_COUNTER;
+		DMSG("SPI-NOR FS: platform counter anchors the file system");
+		return TEE_SUCCESS;
+	}
+	if (res != TEE_ERROR_NOT_IMPLEMENTED || policy != SPINOR_POLICY_AUTO ||
+	    !IS_ENABLED(CFG_INSECURE)) {
+		EMSG("SPI-NOR FS: no rollback anchor: %#"PRIx32, res);
 		return TEE_ERROR_STORAGE_NOT_AVAILABLE;
 	}
 
-	if (!once) {
-		IMSG("WARNING (insecure configuration): SPI-NOR FS has no rollback anchor");
-		once = true;
+	IMSG("WARNING (insecure configuration): SPI-NOR FS has no rollback anchor");
+	spinor_anchor = SPINOR_ANCHOR_NONE;
+
+	return TEE_SUCCESS;
+}
+
+static TEE_Result spinor_anchor_get(uint32_t *value)
+{
+	switch (spinor_anchor) {
+	case SPINOR_ANCHOR_RPMC:
+		return spi_nor_rpmc_counter_get(spinor_anchor_nor,
+						CFG_SPI_NOR_FS_RPMC_COUNTER,
+						value);
+	case SPINOR_ANCHOR_NV_COUNTER:
+		return nv_counter_get_spinor_fs(value);
+	default:
+		*value = 0;
+		return TEE_SUCCESS;
+	}
+}
+
+static TEE_Result spinor_anchor_incr_to(uint32_t value)
+{
+	switch (spinor_anchor) {
+	case SPINOR_ANCHOR_RPMC:
+		return spi_nor_rpmc_counter_incr_to(spinor_anchor_nor,
+						    CFG_SPI_NOR_FS_RPMC_COUNTER,
+						    value);
+	case SPINOR_ANCHOR_NV_COUNTER:
+		return nv_counter_incr_spinor_fs_to(value);
+	default:
+		return TEE_SUCCESS;
+	}
+}
+
+static TEE_Result spinor_open_dirh(struct fs_instance *fs,
+				   struct tee_fs_dirfile_dirh **dirh)
+{
+	TEE_Result res = TEE_ERROR_GENERIC;
+	uint32_t min_counter = 0;
+
+	res = spinor_select_anchor();
+	if (!res)
+		res = spinor_anchor_get(&min_counter);
+	if (res)
+		return res;
+
+	res = tee_fs_dirfile_open(false, NULL, min_counter, fs->dirf_ops,
+				  dirh);
+	if (res == TEE_ERROR_SECURITY)
+		EMSG("SPI-NOR FS: dirf.db is older than the rollback anchor");
+	if (res != TEE_ERROR_ITEM_NOT_FOUND)
+		return res;
+
+	if (min_counter) {
+		if (!IS_ENABLED(CFG_SPI_NOR_FS_ALLOW_RESET)) {
+			EMSG("SPI-NOR FS: dirf.db not found");
+			return TEE_ERROR_SECURITY;
+		}
+		IMSG("SPI-NOR FS: dirf.db not found, starting over at counter %"PRIu32,
+		     min_counter);
 	}
 
-	res = tee_fs_dirfile_open(false, NULL, 0, fs->dirf_ops, dirh);
-	if (res == TEE_ERROR_ITEM_NOT_FOUND) {
-		DMSG("SPI-NOR FS: create dirf.db");
-		res = tee_fs_dirfile_open(true, NULL, 0, fs->dirf_ops, dirh);
-	}
-
-	return res;
+	return tee_fs_dirfile_open(true, NULL, min_counter, fs->dirf_ops, dirh);
 }
 
 static TEE_Result spinor_commit_dirh_writes(struct fs_instance *fs __unused,
 					    struct tee_fs_dirfile_dirh *dirh)
 {
-	return tee_fs_dirfile_commit_writes(dirh, NULL, NULL);
+	TEE_Result res = TEE_ERROR_GENERIC;
+	uint32_t counter = 0;
+
+	res = tee_fs_dirfile_commit_writes(dirh, NULL, &counter);
+	if (res)
+		return res;
+
+	return spinor_anchor_incr_to(counter);
 }
 
 static void spinor_close_dirh(struct fs_instance *fs __unused,
