@@ -1075,17 +1075,22 @@ CFG_DRIVERS_SPI_MEM ?= n
 #
 # CFG_SPI_NOR_EMBEDDED_TEST adds the SPI-NOR self tests to the core self tests
 # (xtest 1001). They erase and program the simulated flash only.
+#
+# CFG_SPI_NOR_RPMC adds the commands of the Replay Protected Monotonic
+# Counters (RPMC) of flashes whose SFDP tables declare them.
 CFG_DRIVERS_SPI_NOR ?= n
 CFG_SPI_NOR_GPT ?= n
 CFG_SPI_NOR_SIM ?= n
 CFG_SPI_NOR_SIM_SIZE ?= 262144
 CFG_SPI_NOR_EMBEDDED_TEST ?= $(call cfg-all-enabled,CFG_SPI_NOR_SIM \
 				  CFG_TEE_CORE_EMBED_INTERNAL_TESTS)
+CFG_SPI_NOR_RPMC ?= n
 $(eval $(call cfg-depends-all,CFG_DRIVERS_SPI_NOR,CFG_DRIVERS_SPI_MEM))
 $(eval $(call cfg-depends-all,CFG_SPI_NOR_GPT,CFG_DRIVERS_SPI_NOR))
 $(eval $(call cfg-depends-all,CFG_SPI_NOR_SIM,CFG_DRIVERS_SPI_NOR))
 $(eval $(call cfg-depends-all,CFG_SPI_NOR_EMBEDDED_TEST,CFG_SPI_NOR_SIM \
 	 CFG_TEE_CORE_EMBED_INTERNAL_TESTS))
+$(eval $(call cfg-depends-all,CFG_SPI_NOR_RPMC,CFG_DRIVERS_SPI_NOR))
 
 # When enabled, CFG_SPI_NOR_FS provides secure storage in a region of a
 # SPI-NOR flash, with the storage ID TEE_STORAGE_PRIVATE_SPI_NOR. It is the
