@@ -1610,4 +1610,122 @@ const struct tee_file_operations spinor_fs_ops = {
 	.closedir = ree_fs_closedir_rpc,
 	.readdir = ree_fs_readdir_rpc,
 };
+
+#ifdef CFG_SPI_NOR_EMBEDDED_TEST
+static TEE_Result st_write(struct tee_pobj *po, bool create, uint8_t val)
+{
+	struct tee_file_handle *fh = NULL;
+	TEE_Result res = TEE_ERROR_GENERIC;
+	size_t size = 0;
+
+	if (create) {
+		res = spinor_fs_ops.create(po, true, NULL, 0, NULL, 0, &val,
+					   NULL, 1, &fh);
+	} else {
+		res = spinor_fs_ops.open(po, &size, &fh);
+		if (!res)
+			res = spinor_fs_ops.write(fh, 0, &val, NULL, 1);
+	}
+	spinor_fs_ops.close(&fh);
+
+	return res;
+}
+
+static TEE_Result st_read(struct tee_pobj *po, uint8_t *val)
+{
+	struct tee_file_handle *fh = NULL;
+	TEE_Result res = TEE_ERROR_GENERIC;
+	size_t size = 0;
+	size_t len = 1;
+
+	res = spinor_fs_ops.open(po, &size, &fh);
+	if (res)
+		return res;
+	res = spinor_fs_ops.read(fh, 0, val, NULL, &len);
+	spinor_fs_ops.close(&fh);
+
+	return res;
+}
+
+/*
+ * Put back the flash image from before the last commit, as an attacker
+ * with an external programmer would, and check that it does not mount
+ * when there is a rollback anchor. Then restore the current image.
+ */
+TEE_Result spinor_fs_rollback_self_test(void)
+{
+	char obj_id[] = "spinor-fs-rollback-test";
+	struct tee_pobj po = {
+		.uuid = { 0x5d2c2d40, 0x3a57, 0x4ab7,
+			  { 0x9d, 0x1b, 0x31, 0x5f, 0x7b, 0x26, 0x0b, 0x3c } },
+		.obj_id = obj_id,
+		.obj_id_len = sizeof(obj_id),
+		.fops = &spinor_fs_ops,
+	};
+	TEE_Result expect = TEE_ERROR_SECURITY;
+	TEE_Result res = TEE_ERROR_GENERIC;
+	struct spi_nor *nor = NULL;
+	uint8_t val = 0;
+
+	/* The test swaps flash images: only on the simulated flash */
+	if (spinor_fs_store_get_flash(&nor) || nor != spi_nor_sim_get()) {
+		IMSG("SPI-NOR FS rollback self test skipped: no storage");
+		return TEE_SUCCESS;
+	}
+
+	/* The store is remounted below: no other user may hold it */
+	mutex_lock(&spinor_fs_inst.mutex);
+	res = spinor_fs_inst.dirh_refcount ? TEE_ERROR_BUSY : TEE_SUCCESS;
+	mutex_unlock(&spinor_fs_inst.mutex);
+	if (res) {
+		IMSG("SPI-NOR FS rollback self test skipped: storage in use");
+		return TEE_SUCCESS;
+	}
+
+	res = st_write(&po, true, 1);
+	if (res)
+		goto err;
+
+	spi_nor_sim_snapshot();
+	res = st_write(&po, false, 2);
+	if (res)
+		goto err;
+
+	/* The old image */
+	res = spi_nor_sim_swap_snapshot();
+	if (res)
+		goto err;
+	spinor_fs_store_remount();
+	res = st_read(&po, &val);
+	if (spinor_anchor == SPINOR_ANCHOR_NONE) {
+		/* Without an anchor the old image is accepted: the gap */
+		expect = TEE_SUCCESS;
+	}
+	if (res != expect) {
+		EMSG("Replayed image: %#"PRIx32", expected %#"PRIx32, res,
+		     expect);
+		res = TEE_ERROR_GENERIC;
+	} else {
+		res = TEE_SUCCESS;
+	}
+
+	/* The current image */
+	if (spi_nor_sim_swap_snapshot())
+		panic();
+	spinor_fs_store_remount();
+	if (res)
+		goto err;
+
+	res = st_read(&po, &val);
+	if (!res && val != 2)
+		res = TEE_ERROR_GENERIC;
+	if (res)
+		goto err;
+
+	return spinor_fs_ops.remove(&po);
+err:
+	EMSG("SPI-NOR FS rollback self test failed: %#"PRIx32, res);
+	return TEE_ERROR_GENERIC;
+}
+#endif /*CFG_SPI_NOR_EMBEDDED_TEST*/
 #endif /*CFG_SPI_NOR_FS*/

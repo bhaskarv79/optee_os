@@ -1182,6 +1182,11 @@ const struct tee_fs_backend_ops spinor_fs_backend = {
 };
 
 #ifdef CFG_SPI_NOR_EMBEDDED_TEST
+void spinor_fs_store_remount(void)
+{
+	sfs_unmount(&fs_store);
+}
+
 /*
  * Store self test on the part of the simulated flash after the SPI-NOR FS
  * region, run with the core self tests. It formats, writes, remounts,

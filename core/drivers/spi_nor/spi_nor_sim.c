@@ -102,6 +102,45 @@ struct spi_nor_sim {
 
 static struct spi_nor_sim sim;
 
+/*
+ * Copy-on-write snapshot: while recording, the first program or erase of
+ * a sector saves its content first.
+ */
+#define SIM_SNAP_SECTORS	16
+
+static struct {
+	bool recording;
+	bool overflow;
+	unsigned int count;
+	uint32_t addr[SIM_SNAP_SECTORS];
+	uint8_t data[SIM_SNAP_SECTORS][SIM_SECTOR_SIZE];
+} snap;
+
+static void sim_snap_save(uint64_t addr, size_t len)
+{
+	uint64_t sec = ROUNDDOWN(addr, SIM_SECTOR_SIZE);
+	unsigned int n = 0;
+
+	if (!snap.recording)
+		return;
+
+	for (; sec < addr + len; sec += SIM_SECTOR_SIZE) {
+		for (n = 0; n < snap.count; n++)
+			if (snap.addr[n] == sec)
+				break;
+		if (n < snap.count)
+			continue;
+		if (snap.count == SIM_SNAP_SECTORS) {
+			snap.overflow = true;
+			return;
+		}
+		snap.addr[snap.count] = sec;
+		memcpy(snap.data[snap.count], sim.array + sec,
+		       SIM_SECTOR_SIZE);
+		snap.count++;
+	}
+}
+
 static void build_sfdp(uint8_t *sfdp)
 {
 	uint8_t *bfpt = sfdp + SIM_SFDP_BFPT_OFFS;
@@ -289,6 +328,36 @@ static TEE_Result sim_rpmc_op2(const struct spi_mem_op *op)
 	return TEE_SUCCESS;
 }
 
+void spi_nor_sim_snapshot(void)
+{
+	snap.recording = true;
+	snap.overflow = false;
+	snap.count = 0;
+}
+
+TEE_Result spi_nor_sim_swap_snapshot(void)
+{
+	uint8_t *cur = NULL;
+	uint8_t tmp = 0;
+	unsigned int n = 0;
+	size_t i = 0;
+
+	snap.recording = false;
+	if (snap.overflow)
+		return TEE_ERROR_OUT_OF_MEMORY;
+
+	for (n = 0; n < snap.count; n++) {
+		cur = sim.array + snap.addr[n];
+		for (i = 0; i < SIM_SECTOR_SIZE; i++) {
+			tmp = cur[i];
+			cur[i] = snap.data[n][i];
+			snap.data[n][i] = tmp;
+		}
+	}
+
+	return TEE_SUCCESS;
+}
+
 void spi_nor_sim_rpmc_fault(enum spi_nor_sim_rpmc_fault fault)
 {
 	sim.rpmc.fault = fault;
@@ -323,6 +392,8 @@ static TEE_Result sim_program(const struct spi_mem_op *op)
 	    op->addr.val >= SIM_SIZE)
 		return TEE_ERROR_BAD_STATE;
 
+	sim_snap_save(page, SIM_PAGE_SIZE);
+
 	/* Program clears bits only and wraps inside the page */
 	for (n = 0; n < op->data.nbytes; n++)
 		sim.array[page + (col + n) % SIM_PAGE_SIZE] &= data[n];
@@ -338,6 +409,7 @@ static TEE_Result sim_erase(const struct spi_mem_op *op, size_t unit)
 	if (!sim.wel || op->addr.val >= SIM_SIZE)
 		return TEE_ERROR_BAD_STATE;
 
+	sim_snap_save(ROUNDDOWN(op->addr.val, unit), unit);
 	memset(sim.array + ROUNDDOWN(op->addr.val, unit), 0xff, unit);
 	sim.wel = false;
 	sim_set_busy();

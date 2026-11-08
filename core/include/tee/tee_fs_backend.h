@@ -61,8 +61,19 @@ const char *spinor_fs_store_dt_anchor(void);
 #if defined(CFG_SPI_NOR_FS) && defined(CFG_SPI_NOR_EMBEDDED_TEST)
 /* Store format, remount, torn-record and fill tests on the simulator */
 TEE_Result spinor_fs_store_self_test(void);
+
+/* Drop the store index so the next access mounts the flash again */
+void spinor_fs_store_remount(void);
+
+/* Replay of an old flash image against the rollback anchor */
+TEE_Result spinor_fs_rollback_self_test(void);
 #else
 static inline TEE_Result spinor_fs_store_self_test(void)
+{
+	return TEE_SUCCESS;
+}
+
+static inline TEE_Result spinor_fs_rollback_self_test(void)
 {
 	return TEE_SUCCESS;
 }
