@@ -10,6 +10,7 @@
  */
 
 #include <drivers/spi_nor.h>
+#include <drivers/spi_nor_rpmc.h>
 #include <io.h>
 #include <string.h>
 #include <tee_api_types.h>
@@ -236,6 +237,73 @@ static void test_partitions(struct spi_nor *nor)
 	CHECK(!spi_nor_find_partition("st-b"));
 }
 
+#ifdef CFG_SPI_NOR_RPMC
+/* Counter 3 of the simulator is reserved for this test */
+#define ST_RPMC_CTR	3
+
+static void test_rpmc(struct spi_nor *nor)
+{
+	uint8_t root[SPI_NOR_RPMC_KEY_SIZE] = { };
+	uint8_t bad[SPI_NOR_RPMC_KEY_SIZE] = { };
+	uint8_t key[SPI_NOR_RPMC_KEY_SIZE] = { };
+	TEE_Result res = TEE_ERROR_GENERIC;
+	uint32_t val = 0;
+	uint32_t v = 0;
+
+	CHECK(spi_nor_rpmc_counters(nor) == 4);
+
+	memset(root, 0x5a, sizeof(root));
+	memset(bad, 0xa5, sizeof(bad));
+
+	/* Without a root key, a session is refused as such */
+	res = spi_nor_rpmc_update_hmac_key(nor, ST_RPMC_CTR, root, 0, key);
+	CHECK(!res || res == TEE_ERROR_ITEM_NOT_FOUND);
+
+	/* Root keys are written once: a second run of the test finds it */
+	res = spi_nor_rpmc_write_root_key(nor, ST_RPMC_CTR, root);
+	CHECK(!res || res == TEE_ERROR_BAD_STATE);
+	CHECK(spi_nor_rpmc_write_root_key(nor, ST_RPMC_CTR, bad) ==
+	      TEE_ERROR_BAD_STATE);
+
+	/* A session needs the right root key */
+	CHECK(spi_nor_rpmc_update_hmac_key(nor, ST_RPMC_CTR, bad, 1, key) ==
+	      TEE_ERROR_BAD_STATE);
+	CHECK(!spi_nor_rpmc_update_hmac_key(nor, ST_RPMC_CTR, root, 2, key));
+
+	CHECK(!spi_nor_rpmc_read(nor, ST_RPMC_CTR, key, &val));
+	CHECK(!spi_nor_rpmc_increment(nor, ST_RPMC_CTR, key, val));
+	CHECK(!spi_nor_rpmc_read(nor, ST_RPMC_CTR, key, &v));
+	CHECK(v == val + 1);
+
+	/* A stale current value is refused and the counter does not move */
+	CHECK(spi_nor_rpmc_increment(nor, ST_RPMC_CTR, key, val) ==
+	      TEE_ERROR_BAD_STATE);
+	CHECK(!spi_nor_rpmc_read(nor, ST_RPMC_CTR, key, &v));
+	CHECK(v == val + 1);
+
+	/* A corrupted or replayed reply is rejected */
+	spi_nor_sim_rpmc_fault(SPI_NOR_SIM_RPMC_BAD_SIG);
+	CHECK(spi_nor_rpmc_read(nor, ST_RPMC_CTR, key, &v) ==
+	      TEE_ERROR_SECURITY);
+	spi_nor_sim_rpmc_fault(SPI_NOR_SIM_RPMC_REPLAY);
+	CHECK(spi_nor_rpmc_read(nor, ST_RPMC_CTR, key, &v) ==
+	      TEE_ERROR_SECURITY);
+
+	/* An old session key no longer works after a new session */
+	memcpy(bad, key, sizeof(bad));
+	CHECK(!spi_nor_rpmc_update_hmac_key(nor, ST_RPMC_CTR, root, 3, key));
+	CHECK(spi_nor_rpmc_read(nor, ST_RPMC_CTR, bad, &v) ==
+	      TEE_ERROR_BAD_STATE);
+	CHECK(!spi_nor_rpmc_read(nor, ST_RPMC_CTR, key, &v));
+
+	CHECK(spi_nor_rpmc_read(nor, 4, key, &v) == TEE_ERROR_BAD_PARAMETERS);
+}
+#else
+static void test_rpmc(struct spi_nor *nor __unused)
+{
+}
+#endif
+
 TEE_Result spi_nor_self_test(void)
 {
 	struct spi_nor *nor = spi_nor_sim_get();
@@ -250,6 +318,7 @@ TEE_Result spi_nor_self_test(void)
 	} else {
 		test_nor(nor);
 		test_partitions(nor);
+		test_rpmc(nor);
 	}
 
 	return failures ? TEE_ERROR_GENERIC : TEE_SUCCESS;
