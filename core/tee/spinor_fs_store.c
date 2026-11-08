@@ -35,6 +35,8 @@
 #include <assert.h>
 #include <drivers/spi_nor.h>
 #include <inttypes.h>
+#include <kernel/dt.h>
+#include <libfdt.h>
 #include <malloc.h>
 #include <stddef.h>
 #include <string.h>
@@ -58,6 +60,9 @@
  * and files removed, when the store is full
  */
 #define SFS_DIRF_RESERVE	2
+
+/* Name of the flash partition holding the store */
+#define SPINOR_FS_PARTITION	"optee-fs"
 
 enum sfs_rec_type {
 	SFS_REC_HEAD = TEE_FS_HTREE_TYPE_HEAD,
@@ -903,16 +908,12 @@ static TEE_Result sfs_truncate_file(struct sfs *s, uint32_t file,
 	return TEE_SUCCESS;
 }
 
-static TEE_Result sfs_init(struct sfs *s, unsigned int dev, uint64_t offs,
+static TEE_Result sfs_init(struct sfs *s, struct spi_nor *nor, uint64_t offs,
 			   uint64_t size)
 {
 	struct spi_nor_info info = { };
-	TEE_Result res = TEE_ERROR_GENERIC;
 
-	res = spi_nor_get(dev, &s->nor);
-	if (res)
-		return TEE_ERROR_STORAGE_NOT_AVAILABLE;
-
+	s->nor = nor;
 	spi_nor_get_info(s->nor, &info);
 	if (!size)
 		size = info.size > offs ? info.size - offs : 0;
@@ -932,16 +933,90 @@ static TEE_Result sfs_init(struct sfs *s, unsigned int dev, uint64_t offs,
 	return sfs_mount(s);
 }
 
+static bool dt_declares(const void *fdt, const char *label)
+{
+	int node = 0;
+
+	if (!fdt)
+		return false;
+
+	node = fdt_node_offset_by_prop_value(fdt, -1, "label", label,
+					     strlen(label) + 1);
+
+	return node >= 0 && fdt_get_status(fdt, node) != DT_STATUS_DISABLED;
+}
+
+/*
+ * Find the region of the store. The flash partition named @label is used
+ * if there is one. If the secure DT @fdt declares it but no probed flash
+ * has it, the flash failed: the store is unavailable, it never moves to
+ * another region. Without such a partition, the region comes from the
+ * build configuration (a size of 0 meaning to the end of the flash).
+ */
+static TEE_Result find_region(const void *fdt, const char *label,
+			      struct spi_nor **nor, uint64_t *offs,
+			      uint64_t *size)
+{
+	struct spi_nor_partition *part = spi_nor_find_partition(label);
+
+	if (part) {
+		*nor = part->nor;
+		*offs = part->offs;
+		*size = part->size;
+		return TEE_SUCCESS;
+	}
+
+	if (dt_declares(fdt, label)) {
+		EMSG("SPI-NOR FS: no flash with partition \"%s\"", label);
+		return TEE_ERROR_STORAGE_NOT_AVAILABLE;
+	}
+
+	if (spi_nor_get(CFG_SPI_NOR_FS_DEVICE, nor))
+		return TEE_ERROR_STORAGE_NOT_AVAILABLE;
+	*offs = CFG_SPI_NOR_FS_OFFSET;
+	*size = CFG_SPI_NOR_FS_SIZE;
+
+	return TEE_SUCCESS;
+}
+
 /* The store behind TEE_STORAGE_PRIVATE_SPI_NOR */
 static struct sfs fs_store;
 
 static TEE_Result fs_store_ready(void)
 {
+	struct spi_nor *nor = NULL;
+	TEE_Result res = TEE_ERROR_GENERIC;
+	uint64_t offs = 0;
+	uint64_t size = 0;
+
 	if (fs_store.mounted)
 		return TEE_SUCCESS;
 
-	return sfs_init(&fs_store, CFG_SPI_NOR_FS_DEVICE, CFG_SPI_NOR_FS_OFFSET,
-			CFG_SPI_NOR_FS_SIZE);
+	res = find_region(get_embedded_dt(), SPINOR_FS_PARTITION, &nor, &offs,
+			  &size);
+	if (res)
+		return res;
+
+	/*
+	 * A region from the build configuration is declared as a partition
+	 * too, so that no other partition, such as one the normal world may
+	 * access, can overlap it.
+	 */
+	if (!spi_nor_find_partition(SPINOR_FS_PARTITION)) {
+		struct spi_nor_info info = { };
+
+		spi_nor_get_info(nor, &info);
+		if (!size && info.size > offs)
+			size = info.size - offs;
+		if (spi_nor_add_partition(nor, SPINOR_FS_PARTITION, offs, size,
+					  NULL)) {
+			EMSG("SPI-NOR FS: region %#"PRIx64" + %#"PRIx64
+			     " overlaps a partition or is invalid", offs, size);
+			return TEE_ERROR_STORAGE_NOT_AVAILABLE;
+		}
+	}
+
+	return sfs_init(&fs_store, nor, offs, size);
 }
 
 static uint32_t dfh_to_file(const struct tee_fs_dirfile_fileh *dfh)
@@ -1125,12 +1200,54 @@ static bool st_item_is(struct sfs *s, uint32_t file, uint8_t type,
 	return ok;
 }
 
-static TEE_Result st_remount(struct sfs *s, unsigned int dev, uint64_t offs,
-			     uint64_t size)
+static TEE_Result st_remount(struct sfs *s, struct spi_nor *nor,
+			     uint64_t offs, uint64_t size)
 {
 	sfs_unmount(s);
 
-	return sfs_init(s, dev, offs, size);
+	return sfs_init(s, nor, offs, size);
+}
+
+/*
+ * Region lookup: partition first, no fallback when the DT declares it. The
+ * test partition is at @offs_part, in the test region.
+ */
+static void st_find_region(struct spi_nor *nor, uint64_t offs_part)
+{
+	const char *label = "st-sfs";
+	struct spi_nor_partition *part = NULL;
+	struct spi_nor *found = NULL;
+	uint64_t offs = 0;
+	uint64_t size = 0;
+	/* libfdt needs an 8-byte aligned tree */
+	uint64_t fdt_buf[32] = { };
+	void *fdt = fdt_buf;
+	bool ok = false;
+
+	ok = !fdt_create(fdt, sizeof(fdt_buf)) && !fdt_finish_reservemap(fdt) &&
+	     !fdt_begin_node(fdt, "") && !fdt_begin_node(fdt, "p@0") &&
+	     !fdt_property_string(fdt, "label", label) &&
+	     !fdt_end_node(fdt) && !fdt_end_node(fdt) && !fdt_finish(fdt);
+	ST_CHECK(ok);
+	if (!ok)
+		return;
+
+	/* Declared but not probed: unavailable */
+	ST_CHECK(find_region(fdt, label, &found, &offs, &size) ==
+		 TEE_ERROR_STORAGE_NOT_AVAILABLE);
+
+	/* Not declared: the build-time region */
+	ST_CHECK(!find_region(NULL, label, &found, &offs, &size));
+	ST_CHECK(found && offs == CFG_SPI_NOR_FS_OFFSET &&
+		 size == CFG_SPI_NOR_FS_SIZE);
+
+	/* A probed partition wins */
+	ST_CHECK(!spi_nor_add_partition(nor, label, offs_part, SFS_UNIT,
+					&part));
+	ST_CHECK(!find_region(fdt, label, &found, &offs, &size));
+	ST_CHECK(found == nor && offs == offs_part && size == SFS_UNIT);
+	if (part)
+		spi_nor_del_partition(part);
 }
 
 TEE_Result spinor_fs_store_self_test(void)
@@ -1166,9 +1283,11 @@ TEE_Result spinor_fs_store_self_test(void)
 
 	st_failures = 0;
 
+	st_find_region(nor, offs);
+
 	/* Format: an erased region mounts empty */
 	ST_CHECK(!spi_nor_erase(nor, offs, size));
-	ST_CHECK(!sfs_init(&s, CFG_SPI_NOR_FS_DEVICE, offs, size));
+	ST_CHECK(!sfs_init(&s, nor, offs, size));
 	ST_CHECK(!s.nitems);
 
 	/* Write all item types, overwrite one, then remount */
@@ -1182,7 +1301,7 @@ TEE_Result spinor_fs_store_self_test(void)
 	ST_CHECK(!sfs_write_item(&s, 1, SFS_REC_BLOCK, 0, 0, data));
 	st_fill(data, SFS_UNIT, 5);
 	ST_CHECK(!sfs_write_item(&s, 2, SFS_REC_BLOCK, 7, 0, data));
-	ST_CHECK(!st_remount(&s, CFG_SPI_NOR_FS_DEVICE, offs, size));
+	ST_CHECK(!st_remount(&s, nor, offs, size));
 	ST_CHECK(st_item_is(&s, 1, SFS_REC_HEAD, 0, 1));
 	ST_CHECK(st_item_is(&s, 1, SFS_REC_NODE, 0, 2));
 	ST_CHECK(st_item_is(&s, 1, SFS_REC_BLOCK, 0, 4));
@@ -1191,7 +1310,7 @@ TEE_Result spinor_fs_store_self_test(void)
 	/* Truncation and removal survive a remount */
 	ST_CHECK(!sfs_truncate_file(&s, 2, 7));
 	ST_CHECK(!sfs_remove_file(&s, 1));
-	ST_CHECK(!st_remount(&s, CFG_SPI_NOR_FS_DEVICE, offs, size));
+	ST_CHECK(!st_remount(&s, nor, offs, size));
 	ST_CHECK(!file_exists(&s, 1));
 	ST_CHECK(!find_item(&s, 2, SFS_REC_BLOCK, 7, 0));
 
@@ -1208,12 +1327,12 @@ TEE_Result spinor_fs_store_self_test(void)
 		ST_CHECK(!spi_nor_write(nor, sec_addr(&s, s.head) +
 					s.head_off, &h, sizeof(h)));
 	}
-	ST_CHECK(!st_remount(&s, CFG_SPI_NOR_FS_DEVICE, offs, size));
+	ST_CHECK(!st_remount(&s, nor, offs, size));
 	ST_CHECK(st_item_is(&s, 3, SFS_REC_NODE, 1, 6));
 	ST_CHECK(!s.head_valid);
 	st_fill(data, SFS_UNIT, 7);
 	ST_CHECK(!sfs_write_item(&s, 3, SFS_REC_NODE, 2, 0, data));
-	ST_CHECK(!st_remount(&s, CFG_SPI_NOR_FS_DEVICE, offs, size));
+	ST_CHECK(!st_remount(&s, nor, offs, size));
 	ST_CHECK(st_item_is(&s, 3, SFS_REC_NODE, 2, 7));
 
 	/* Rewriting one item many times wraps the log through compaction */
@@ -1224,7 +1343,7 @@ TEE_Result spinor_fs_store_self_test(void)
 			break;
 	}
 	ST_CHECK(!res);
-	ST_CHECK(!st_remount(&s, CFG_SPI_NOR_FS_DEVICE, offs, size));
+	ST_CHECK(!st_remount(&s, nor, offs, size));
 	ST_CHECK(st_item_is(&s, 4, SFS_REC_NODE, 0, (uint8_t)(n - 1)));
 
 	/*
@@ -1240,7 +1359,7 @@ TEE_Result spinor_fs_store_self_test(void)
 			break;
 	}
 	ST_CHECK(!res);
-	ST_CHECK(!st_remount(&s, CFG_SPI_NOR_FS_DEVICE, offs, size));
+	ST_CHECK(!st_remount(&s, nor, offs, size));
 	ST_CHECK(st_item_is(&s, 7, SFS_REC_NODE, 99, 8));
 	ST_CHECK(!sfs_remove_file(&s, 7));
 
@@ -1256,7 +1375,7 @@ TEE_Result spinor_fs_store_self_test(void)
 
 		ST_CHECK(!append(&s, &h, NULL, SFS_RESERVE, NULL));
 	}
-	ST_CHECK(!st_remount(&s, CFG_SPI_NOR_FS_DEVICE, offs, size));
+	ST_CHECK(!st_remount(&s, nor, offs, size));
 	ST_CHECK(!find_item(&s, 8, SFS_REC_BLOCK, 0, 0));
 	ST_CHECK(st_item_is(&s, 9, SFS_REC_BLOCK, 0, 9));
 	ST_CHECK(!sfs_remove_file(&s, 9));
