@@ -15,3 +15,13 @@ TEE_Result __weak nv_counter_incr_ree_fs_to(uint32_t value __unused)
 {
 	return TEE_ERROR_NOT_IMPLEMENTED;
 }
+
+TEE_Result __weak nv_counter_get_spinor_fs(uint32_t *value __unused)
+{
+	return TEE_ERROR_NOT_IMPLEMENTED;
+}
+
+TEE_Result __weak nv_counter_incr_spinor_fs_to(uint32_t value __unused)
+{
+	return TEE_ERROR_NOT_IMPLEMENTED;
+}
