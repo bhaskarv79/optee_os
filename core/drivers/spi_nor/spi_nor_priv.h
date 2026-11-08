@@ -133,4 +133,19 @@ TEE_Result spi_nor_sfdp_parse(sfdp_read_func read, void *ctx,
 TEE_Result spi_nor_ids_lookup(const uint8_t id[SPI_NOR_MAX_ID_LEN],
 			      struct spi_nor_geometry *geo);
 
+/*
+ * enum spi_nor_sim_rpmc_fault - Fault the simulator injects in the reply
+ *	to the next RPMC command, for tests
+ * @SPI_NOR_SIM_RPMC_NO_FAULT: None
+ * @SPI_NOR_SIM_RPMC_BAD_SIG: Corrupt the signature
+ * @SPI_NOR_SIM_RPMC_REPLAY: Return the previous counter reply
+ */
+enum spi_nor_sim_rpmc_fault {
+	SPI_NOR_SIM_RPMC_NO_FAULT,
+	SPI_NOR_SIM_RPMC_BAD_SIG,
+	SPI_NOR_SIM_RPMC_REPLAY,
+};
+
+void spi_nor_sim_rpmc_fault(enum spi_nor_sim_rpmc_fault fault);
+
 #endif /* __SPI_NOR_PRIV_H */
