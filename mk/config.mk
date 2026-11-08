@@ -1096,6 +1096,18 @@ ifeq ($(CFG_RPMC_WRITE_ROOT_KEY),y)
 $(info WARNING: CFG_RPMC_WRITE_ROOT_KEY=y is for provisioning builds only)
 endif
 
+# When enabled, CFG_REE_FS_INTEGRITY_RPMC makes RPMC counter
+# CFG_REE_FS_RPMC_COUNTER of the first SPI-NOR flash that has it the
+# monotonic counter of REE FS (nv_counter_*_ree_fs()), protecting REE FS
+# against rollback without RPMB. It excludes CFG_REE_FS_INTEGRITY_RPMB.
+CFG_REE_FS_INTEGRITY_RPMC ?= n
+CFG_REE_FS_RPMC_COUNTER ?= 1
+$(eval $(call cfg-depends-all,CFG_REE_FS_INTEGRITY_RPMC,CFG_REE_FS \
+	 CFG_SPI_NOR_RPMC))
+ifeq ($(CFG_REE_FS_INTEGRITY_RPMC)-$(CFG_REE_FS_INTEGRITY_RPMB),y-y)
+$(error CFG_REE_FS_INTEGRITY_RPMC and CFG_REE_FS_INTEGRITY_RPMB are exclusive)
+endif
+
 # When enabled, CFG_SPI_NOR_FS provides secure storage in a region of a
 # SPI-NOR flash, with the storage ID TEE_STORAGE_PRIVATE_SPI_NOR. It is the
 # REE FS hash-tree file system on a flash backend: no normal-world access.
@@ -1142,6 +1154,11 @@ endif
 endif
 ifeq ($(CFG_SPI_NOR_FS)-$(CFG_NS_VIRTUALIZATION),y-y)
 $(error CFG_SPI_NOR_FS does not support CFG_NS_VIRTUALIZATION)
+endif
+ifeq ($(CFG_REE_FS_INTEGRITY_RPMC)-$(CFG_SPI_NOR_FS),y-y)
+ifeq ($(CFG_REE_FS_RPMC_COUNTER),$(CFG_SPI_NOR_FS_RPMC_COUNTER))
+$(error REE FS and SPI-NOR FS cannot share RPMC counter $(CFG_REE_FS_RPMC_COUNTER))
+endif
 endif
 
 # When enabled, CFG_INSECURE permits insecure configuration of OP-TEE core
