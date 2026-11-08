@@ -1,6 +1,7 @@
 srcs-y += core.c
 srcs-y += ids.c
 srcs-y += partition.c
+srcs-$(CFG_SPI_NOR_NS_ACCESS) += spi_nor_ns.c
 srcs-$(CFG_SPI_NOR_RPMC) += rpmc.c
 srcs-$(CFG_SPI_NOR_RPMC) += rpmc_counter.c
 srcs-y += sfdp.c

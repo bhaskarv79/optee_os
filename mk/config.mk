@@ -1101,6 +1101,13 @@ ifeq ($(CFG_RPMC_WRITE_ROOT_KEY),y)
 $(info WARNING: CFG_RPMC_WRITE_ROOT_KEY=y is for provisioning builds only)
 endif
 
+# When enabled, CFG_SPI_NOR_NS_ACCESS lets the normal world read, program
+# and erase the SPI-NOR partitions whose DT property "optee,ns-access" is
+# "ro" or "rw", through a front-end such as CFG_SPI_NOR_PTA. Requests are
+# checked against the partition bounds and access, and bounded in size.
+CFG_SPI_NOR_NS_ACCESS ?= n
+$(eval $(call cfg-depends-all,CFG_SPI_NOR_NS_ACCESS,CFG_DRIVERS_SPI_NOR))
+
 # When enabled, CFG_REE_FS_INTEGRITY_RPMC makes RPMC counter
 # CFG_REE_FS_RPMC_COUNTER of the first SPI-NOR flash that has it the
 # monotonic counter of REE FS (nv_counter_*_ree_fs()), protecting REE FS
