@@ -39,18 +39,36 @@ struct spi_nor_erase_type {
 };
 
 /**
+ * struct spi_nor_rpmc_params - RPMC parameters from SFDP (JESD216)
+ *
+ * @num_counters: Number of monotonic counters, 0 if the flash has no RPMC
+ * @op1: Opcode of the RPMC commands, commonly 0x9b
+ * @op2: Opcode reading the RPMC extended status and data, commonly 0x96
+ * @poll_op2: Poll the busy bit of the extended status, not of the status
+ *	register
+ */
+struct spi_nor_rpmc_params {
+	uint8_t num_counters;
+	uint8_t op1;
+	uint8_t op2;
+	bool poll_op2;
+};
+
+/**
  * struct spi_nor_geometry - What probing learns about the flash
  *
  * @size: Flash size in bytes
  * @page_size: Program page size in bytes
  * @erase: Erase types, sorted by increasing size, unused slots at the end
  * @addr4_capable: The flash supports 4-byte addressing
+ * @rpmc: RPMC parameters, if any
  */
 struct spi_nor_geometry {
 	uint64_t size;
 	uint32_t page_size;
 	struct spi_nor_erase_type erase[SPI_NOR_MAX_ERASE_TYPES];
 	bool addr4_capable;
+	struct spi_nor_rpmc_params rpmc;
 };
 
 /**
@@ -96,8 +114,8 @@ typedef TEE_Result (*sfdp_read_func)(void *ctx, uint32_t addr, void *buf,
 				     size_t len);
 
 /*
- * spi_nor_sfdp_parse() - Parse the SFDP header and the Basic Flash
- *	Parameter Table (JESD216)
+ * spi_nor_sfdp_parse() - Parse the SFDP header, the Basic Flash Parameter
+ *	Table and, if present, the RPMC Parameter Table (JESD216)
  *
  * Return TEE_SUCCESS and fill @geo on success
  * Return TEE_ERROR_ITEM_NOT_FOUND if there is no valid SFDP signature

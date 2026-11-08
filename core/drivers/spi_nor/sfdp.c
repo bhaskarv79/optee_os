@@ -23,6 +23,7 @@
 #define SFDP_HDR_SIZE		8
 #define SFDP_PARAM_HDR_SIZE	8
 #define SFDP_BFPT_ID		0xff00
+#define SFDP_RPMC_ID		0xff03
 #define SFDP_MAX_PARAM_HDRS	8
 
 /* BFPT length in dwords: 9 in JESD216, 16 from JESD216B */
@@ -46,6 +47,14 @@
 
 #define SPI_NOR_DEFAULT_PAGE_SIZE	256
 
+/* RPMC Parameter Table, dword 1 */
+#define RPMC_DWORDS		2
+#define RPMC_DW1_NO_HARDENING	BIT32(0)
+#define RPMC_DW1_POLL_SR	BIT32(2)
+#define RPMC_DW1_NUM_CTRS	GENMASK_32(7, 4)
+#define RPMC_DW1_OP1		GENMASK_32(15, 8)
+#define RPMC_DW1_OP2		GENMASK_32(23, 16)
+
 struct sfdp_param_hdr {
 	uint16_t id;
 	uint8_t len_dwords;
@@ -59,8 +68,12 @@ static void decode_param_hdr(const uint8_t *raw, struct sfdp_param_hdr *hdr)
 	hdr->ptr = raw[4] | (raw[5] << 8) | (raw[6] << 16);
 }
 
-static TEE_Result find_bfpt(sfdp_read_func read, void *ctx,
-			    struct sfdp_param_hdr *bfpt)
+/*
+ * Find the parameter header with @id. Return TEE_ERROR_ITEM_NOT_FOUND if
+ * there is no SFDP signature, TEE_ERROR_NO_DATA if there is no such table.
+ */
+static TEE_Result find_param(sfdp_read_func read, void *ctx, uint16_t id,
+			     struct sfdp_param_hdr *hdr)
 {
 	uint8_t raw[SFDP_HDR_SIZE] = { };
 	TEE_Result res = TEE_ERROR_GENERIC;
@@ -83,12 +96,47 @@ static TEE_Result find_bfpt(sfdp_read_func read, void *ctx,
 		if (res)
 			return res;
 
-		decode_param_hdr(raw, bfpt);
-		if (bfpt->id == SFDP_BFPT_ID)
+		decode_param_hdr(raw, hdr);
+		if (hdr->id == id)
 			return TEE_SUCCESS;
 	}
 
-	return TEE_ERROR_BAD_FORMAT;
+	return TEE_ERROR_NO_DATA;
+}
+
+/*
+ * RPMC is optional: a flash with a bad or unusable table is used without
+ * RPMC rather than rejected.
+ */
+static void parse_rpmc(sfdp_read_func read, void *ctx,
+		       struct spi_nor_geometry *geo)
+{
+	struct sfdp_param_hdr hdr = { };
+	uint8_t raw[4] = { };
+	uint32_t dw1 = 0;
+
+	if (find_param(read, ctx, SFDP_RPMC_ID, &hdr))
+		return;
+
+	if (hdr.len_dwords < RPMC_DWORDS || read(ctx, hdr.ptr, raw, 4)) {
+		DMSG("SFDP: unreadable RPMC table");
+		return;
+	}
+
+	/*
+	 * Bit 1 (counter size) is not checked: the RPMC packets always carry
+	 * 32-bit counters, and parts disagree on how they encode it.
+	 */
+	dw1 = get_le32(raw);
+	if (dw1 & RPMC_DW1_NO_HARDENING) {
+		DMSG("SFDP: unsupported RPMC flavor %#"PRIx32, dw1);
+		return;
+	}
+
+	geo->rpmc.num_counters = ((dw1 & RPMC_DW1_NUM_CTRS) >> 4) + 1;
+	geo->rpmc.op1 = (dw1 & RPMC_DW1_OP1) >> 8;
+	geo->rpmc.op2 = (dw1 & RPMC_DW1_OP2) >> 16;
+	geo->rpmc.poll_op2 = !(dw1 & RPMC_DW1_POLL_SR);
 }
 
 static TEE_Result decode_density(uint32_t dw2, uint64_t *size)
@@ -146,7 +194,9 @@ TEE_Result spi_nor_sfdp_parse(sfdp_read_func read, void *ctx,
 	unsigned int ndw = 0;
 	unsigned int n = 0;
 
-	res = find_bfpt(read, ctx, &bfpt);
+	res = find_param(read, ctx, SFDP_BFPT_ID, &bfpt);
+	if (res == TEE_ERROR_NO_DATA)
+		return TEE_ERROR_BAD_FORMAT;
 	if (res)
 		return res;
 
@@ -205,6 +255,8 @@ TEE_Result spi_nor_sfdp_parse(sfdp_read_func read, void *ctx,
 		     geo->page_size, geo->erase[0].size);
 		return TEE_ERROR_BAD_FORMAT;
 	}
+
+	parse_rpmc(read, ctx, geo);
 
 	return TEE_SUCCESS;
 }
