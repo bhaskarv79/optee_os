@@ -1084,12 +1084,17 @@ CFG_SPI_NOR_SIM ?= n
 CFG_SPI_NOR_SIM_SIZE ?= 262144
 CFG_SPI_NOR_EMBEDDED_TEST ?= $(call cfg-all-enabled,CFG_SPI_NOR_SIM \
 				  CFG_TEE_CORE_EMBED_INTERNAL_TESTS)
+# CFG_SPI_NOR_TEST_NV_COUNTER implements nv_counter_*_spinor_fs() with a
+# counter in secure RAM, lost at reboot, to test the software fallback
+# anchor of SPI-NOR FS. For testing only: it requires CFG_INSECURE=y.
+CFG_SPI_NOR_TEST_NV_COUNTER ?= n
 CFG_SPI_NOR_RPMC ?= n
 CFG_RPMC_WRITE_ROOT_KEY ?= n
 $(eval $(call cfg-depends-all,CFG_DRIVERS_SPI_NOR,CFG_DRIVERS_SPI_MEM))
 $(eval $(call cfg-depends-all,CFG_SPI_NOR_SIM,CFG_DRIVERS_SPI_NOR))
 $(eval $(call cfg-depends-all,CFG_SPI_NOR_EMBEDDED_TEST,CFG_SPI_NOR_SIM \
 	 CFG_TEE_CORE_EMBED_INTERNAL_TESTS))
+$(eval $(call cfg-depends-all,CFG_SPI_NOR_TEST_NV_COUNTER,CFG_DRIVERS_SPI_NOR))
 $(eval $(call cfg-depends-all,CFG_SPI_NOR_RPMC,CFG_DRIVERS_SPI_NOR))
 $(eval $(call cfg-depends-all,CFG_RPMC_WRITE_ROOT_KEY,CFG_SPI_NOR_RPMC))
 ifeq ($(CFG_RPMC_WRITE_ROOT_KEY),y)
@@ -1199,6 +1204,9 @@ endif
 ifneq ($(CFG_INSECURE),y)
 ifeq ($(CFG_SPI_NOR_SIM),y)
 $(error CFG_SPI_NOR_SIM requires CFG_INSECURE=y)
+endif
+ifeq ($(CFG_SPI_NOR_TEST_NV_COUNTER),y)
+$(error CFG_SPI_NOR_TEST_NV_COUNTER requires CFG_INSECURE=y)
 endif
 endif
 
