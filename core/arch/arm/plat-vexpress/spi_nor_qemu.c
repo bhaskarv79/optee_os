@@ -34,9 +34,22 @@ static struct pl022_data spi;
 
 static TEE_Result add_partitions(struct spi_nor *nor)
 {
-	return spi_nor_add_partition(nor, "optee-fs",
-				     CFG_QEMU_SPI_NOR_FS_OFFSET,
-				     CFG_QEMU_SPI_NOR_FS_SIZE, NULL);
+	struct spi_nor_partition *part = NULL;
+	TEE_Result res = TEE_ERROR_GENERIC;
+
+	res = spi_nor_add_partition(nor, "optee-fs",
+				    CFG_QEMU_SPI_NOR_FS_OFFSET,
+				    CFG_QEMU_SPI_NOR_FS_SIZE, NULL);
+	if (res || !CFG_QEMU_SPI_NOR_NS_SIZE)
+		return res;
+
+	res = spi_nor_add_partition(nor, "ns-data",
+				    CFG_QEMU_SPI_NOR_NS_OFFSET,
+				    CFG_QEMU_SPI_NOR_NS_SIZE, &part);
+	if (!res)
+		part->ns_access = SPI_NOR_NS_ACCESS_RW;
+
+	return res;
 }
 
 static TEE_Result qemu_spi_nor_init(void)
