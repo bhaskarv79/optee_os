@@ -231,6 +231,9 @@ static void test_partitions(struct spi_nor *nor)
 	CHECK(!spi_nor_add_partition(nor, "st-b", 0x2000, 0x1000, &b));
 	CHECK(spi_nor_find_partition("st-b") == b);
 
+	/* Iteration finds both, in order */
+	CHECK(spi_nor_next_partition(a) == b);
+
 	if (a)
 		spi_nor_del_partition(a);
 	if (b)
@@ -270,6 +273,7 @@ static void *make_dt(bool overlap)
 
 		ok = !fdt_begin_node(fdt, "partition@4000") &&
 		     !fdt_property_string(fdt, "label", "st-dt-a") &&
+		     !fdt_property_string(fdt, "optee,ns-access", "ro") &&
 		     !fdt_property(fdt, "reg", reg_a, sizeof(reg_a)) &&
 		     !fdt_end_node(fdt) &&
 		     !fdt_begin_node(fdt, "st-dt-b") &&
@@ -306,7 +310,9 @@ static void test_dt_partitions(struct spi_nor *nor)
 	a = spi_nor_find_partition("st-dt-a");
 	b = spi_nor_find_partition("st-dt-b");
 	CHECK(a && a->offs == 0x4000 && a->size == 0x2000);
+	CHECK(a && a->ns_access == SPI_NOR_NS_ACCESS_RO);
 	CHECK(b && b->offs == 0x6000 && b->size == 0x1000);
+	CHECK(b && b->ns_access == SPI_NOR_NS_ACCESS_NONE);
 	CHECK(!spi_nor_find_partition("st-dt-c"));
 	if (a)
 		spi_nor_del_partition(a);
