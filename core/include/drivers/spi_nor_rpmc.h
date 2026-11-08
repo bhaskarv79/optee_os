@@ -73,6 +73,44 @@ spi_nor_rpmc_update_hmac_key(struct spi_nor *nor, unsigned int ctr,
 			     const uint8_t root_key[SPI_NOR_RPMC_KEY_SIZE],
 			     uint32_t key_data,
 			     uint8_t hmac_key[SPI_NOR_RPMC_KEY_SIZE]);
+
+/**
+ * spi_nor_rpmc_read() - Read a counter
+ *
+ * @nor: SPI-NOR device
+ * @ctr: Counter index
+ * @hmac_key: Session key
+ * @value: Output counter value
+ *
+ * The reply is checked against a fresh random tag and its signature.
+ *
+ * Return TEE_SUCCESS on success
+ * Return TEE_ERROR_SECURITY if the tag or the signature of the reply is
+ *	wrong
+ * Return another TEE_Result compliant code on error
+ */
+TEE_Result spi_nor_rpmc_read(struct spi_nor *nor, unsigned int ctr,
+			     const uint8_t hmac_key[SPI_NOR_RPMC_KEY_SIZE],
+			     uint32_t *value);
+
+/**
+ * spi_nor_rpmc_increment() - Increment a counter by one
+ *
+ * @nor: SPI-NOR device
+ * @ctr: Counter index
+ * @hmac_key: Session key
+ * @cur: Current counter value, checked by the flash
+ *
+ * The counter is read back and must be @cur + 1.
+ *
+ * Return TEE_SUCCESS on success
+ * Return TEE_ERROR_BAD_STATE if the flash rejects the command
+ * Return TEE_ERROR_SECURITY if the value read back is wrong
+ * Return another TEE_Result compliant code on error
+ */
+TEE_Result spi_nor_rpmc_increment(struct spi_nor *nor, unsigned int ctr,
+				  const uint8_t hmac_key[SPI_NOR_RPMC_KEY_SIZE],
+				  uint32_t cur);
 #else
 static inline unsigned int spi_nor_rpmc_counters(struct spi_nor *nor __unused)
 {
