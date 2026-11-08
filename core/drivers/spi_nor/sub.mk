@@ -6,3 +6,4 @@ srcs-$(CFG_SPI_NOR_RPMC) += rpmc_counter.c
 srcs-y += sfdp.c
 srcs-$(CFG_SPI_NOR_SIM) += spi_nor_sim.c
 srcs-$(CFG_SPI_NOR_EMBEDDED_TEST) += spi_nor_selftest.c
+srcs-$(CFG_SPI_NOR_TEST_NV_COUNTER) += test_nv_counter.c
