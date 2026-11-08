@@ -968,6 +968,11 @@ static TEE_Result find_region(const void *fdt, const char *label,
 	struct spi_nor_partition *part = spi_nor_find_partition(label);
 
 	if (part) {
+		if (part->ns_access != SPI_NOR_NS_ACCESS_NONE) {
+			EMSG("SPI-NOR FS: \"%s\" is open to the normal world",
+			     label);
+			return TEE_ERROR_STORAGE_NOT_AVAILABLE;
+		}
 		*nor = part->nor;
 		*offs = part->offs;
 		*size = part->size;

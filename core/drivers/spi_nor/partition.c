@@ -86,6 +86,20 @@ struct spi_nor_partition *spi_nor_find_partition(const char *label)
 	return NULL;
 }
 
+struct spi_nor_partition *
+spi_nor_next_partition(struct spi_nor_partition *part)
+{
+	struct part_entry *e = NULL;
+
+	if (!part)
+		e = STAILQ_FIRST(&part_list);
+	else
+		e = STAILQ_NEXT(container_of(part, struct part_entry, part),
+				link);
+
+	return e ? &e->part : NULL;
+}
+
 void spi_nor_del_partition(struct spi_nor_partition *part)
 {
 	struct part_entry *e = container_of(part, struct part_entry, part);
@@ -118,9 +132,29 @@ static TEE_Result read_cells(const fdt32_t *cell, int ncells, uint64_t *val)
 	return TEE_SUCCESS;
 }
 
+static TEE_Result read_ns_access(const void *fdt, int node,
+				 enum spi_nor_ns_access *access)
+{
+	const char *val = fdt_stringlist_get(fdt, node, "optee,ns-access", 0,
+					     NULL);
+
+	if (!val || !strcmp(val, "none"))
+		*access = SPI_NOR_NS_ACCESS_NONE;
+	else if (!strcmp(val, "ro"))
+		*access = SPI_NOR_NS_ACCESS_RO;
+	else if (!strcmp(val, "rw"))
+		*access = SPI_NOR_NS_ACCESS_RW;
+	else
+		return TEE_ERROR_BAD_FORMAT;
+
+	return TEE_SUCCESS;
+}
+
 static TEE_Result add_dt_partition(struct spi_nor *nor, const void *fdt,
 				   int node, int acells, int scells)
 {
+	enum spi_nor_ns_access access = SPI_NOR_NS_ACCESS_NONE;
+	struct spi_nor_partition *part = NULL;
 	const fdt32_t *reg = NULL;
 	const char *label = NULL;
 	TEE_Result res = TEE_ERROR_GENERIC;
@@ -138,11 +172,19 @@ static TEE_Result add_dt_partition(struct spi_nor *nor, const void *fdt,
 	if (res)
 		return res;
 
+	res = read_ns_access(fdt, node, &access);
+	if (res)
+		return res;
+
 	label = fdt_stringlist_get(fdt, node, "label", 0, NULL);
 	if (!label)
 		label = fdt_get_name(fdt, node, NULL);
 
-	return spi_nor_add_partition(nor, label, offs, size, NULL);
+	res = spi_nor_add_partition(nor, label, offs, size, &part);
+	if (!res)
+		part->ns_access = access;
+
+	return res;
 }
 
 TEE_Result spi_nor_dt_add_partitions(struct spi_nor *nor, const void *fdt,

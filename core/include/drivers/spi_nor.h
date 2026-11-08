@@ -51,6 +51,13 @@ struct spi_nor;
 
 #define SPI_NOR_PART_LABEL_LEN		32
 
+/* Normal-world access to a partition, DT property "optee,ns-access" */
+enum spi_nor_ns_access {
+	SPI_NOR_NS_ACCESS_NONE,
+	SPI_NOR_NS_ACCESS_RO,
+	SPI_NOR_NS_ACCESS_RW,
+};
+
 /**
  * struct spi_nor_partition - Named region of a SPI-NOR flash
  *
@@ -58,12 +65,15 @@ struct spi_nor;
  * @label: Partition name, e.g. "optee-fs"
  * @offs: Byte offset in the flash, aligned to the smallest erase unit
  * @size: Size in bytes, a multiple of the smallest erase unit
+ * @ns_access: What the normal world may do on the partition, through the
+ *	non-secure access service; SPI_NOR_NS_ACCESS_NONE unless set
  */
 struct spi_nor_partition {
 	struct spi_nor *nor;
 	char label[SPI_NOR_PART_LABEL_LEN];
 	uint64_t offs;
 	uint64_t size;
+	enum spi_nor_ns_access ns_access;
 };
 
 #ifdef CFG_DRIVERS_SPI_NOR
@@ -173,6 +183,16 @@ TEE_Result spi_nor_add_partition(struct spi_nor *nor, const char *label,
  * Return the partition, or NULL if no probed flash declares it
  */
 struct spi_nor_partition *spi_nor_find_partition(const char *label);
+
+/**
+ * spi_nor_next_partition() - Iterate over the partitions
+ *
+ * @part: Previous partition, or NULL to get the first one
+ *
+ * Return the next partition, or NULL after the last one
+ */
+struct spi_nor_partition *
+spi_nor_next_partition(struct spi_nor_partition *part);
 
 /**
  * spi_nor_del_partition() - Remove a partition
