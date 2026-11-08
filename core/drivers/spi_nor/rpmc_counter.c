@@ -21,6 +21,7 @@
 #include <inttypes.h>
 #include <kernel/huk_subkey.h>
 #include <kernel/mutex.h>
+#include <kernel/nv_counter.h>
 #include <string.h>
 #include <string_ext.h>
 #include <tee_api_types.h>
@@ -182,3 +183,43 @@ TEE_Result spi_nor_rpmc_counter_incr_to(struct spi_nor *nor, unsigned int ctr,
 
 	return res;
 }
+
+#ifdef CFG_REE_FS_INTEGRITY_RPMC
+/* REE FS monotonic counter on the first flash with enough RPMC counters */
+static TEE_Result ree_fs_flash(struct spi_nor **nor)
+{
+	unsigned int n = 0;
+
+	while (!spi_nor_get(n++, nor))
+		if (spi_nor_rpmc_counters(*nor) > CFG_REE_FS_RPMC_COUNTER)
+			return TEE_SUCCESS;
+
+	EMSG("RPMC: no flash with counter %d for REE FS",
+	     CFG_REE_FS_RPMC_COUNTER);
+
+	return TEE_ERROR_STORAGE_NOT_AVAILABLE;
+}
+
+TEE_Result nv_counter_get_ree_fs(uint32_t *value)
+{
+	struct spi_nor *nor = NULL;
+	TEE_Result res = ree_fs_flash(&nor);
+
+	if (res)
+		return res;
+
+	return spi_nor_rpmc_counter_get(nor, CFG_REE_FS_RPMC_COUNTER, value);
+}
+
+TEE_Result nv_counter_incr_ree_fs_to(uint32_t value)
+{
+	struct spi_nor *nor = NULL;
+	TEE_Result res = ree_fs_flash(&nor);
+
+	if (res)
+		return res;
+
+	return spi_nor_rpmc_counter_incr_to(nor, CFG_REE_FS_RPMC_COUNTER,
+					    value);
+}
+#endif /*CFG_REE_FS_INTEGRITY_RPMC*/
