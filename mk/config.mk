@@ -1112,8 +1112,13 @@ endif
 # and erase the SPI-NOR partitions whose DT property "optee,ns-access" is
 # "ro" or "rw", through a front-end such as CFG_SPI_NOR_PTA. Requests are
 # checked against the partition bounds and access, and bounded in size.
+#
+# CFG_SPI_NOR_PTA is the pseudo TA front-end of CFG_SPI_NOR_NS_ACCESS, for
+# a normal-world kernel driver (lib/libutee/include/pta_spi_nor.h).
 CFG_SPI_NOR_NS_ACCESS ?= n
+CFG_SPI_NOR_PTA ?= n
 $(eval $(call cfg-depends-all,CFG_SPI_NOR_NS_ACCESS,CFG_DRIVERS_SPI_NOR))
+$(eval $(call cfg-depends-all,CFG_SPI_NOR_PTA,CFG_SPI_NOR_NS_ACCESS))
 
 # When enabled, CFG_REE_FS_INTEGRITY_RPMC makes RPMC counter
 # CFG_REE_FS_RPMC_COUNTER of the first SPI-NOR flash that has it the
