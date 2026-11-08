@@ -163,6 +163,40 @@ static void test_nor(struct spi_nor *nor)
 	      TEE_ERROR_BAD_PARAMETERS);
 }
 
+static void test_partitions(struct spi_nor *nor)
+{
+	struct spi_nor_partition *a = NULL;
+	struct spi_nor_partition *b = NULL;
+
+	CHECK(!spi_nor_add_partition(nor, "st-a", 0, 0x2000, &a));
+	CHECK(spi_nor_find_partition("st-a") == a);
+	CHECK(a && a->nor == nor && a->offs == 0 && a->size == 0x2000);
+
+	/* Overlaps, duplicate labels and bad ranges are rejected */
+	CHECK(spi_nor_add_partition(nor, "st-b", 0x1000, 0x2000, &b) ==
+	      TEE_ERROR_BAD_PARAMETERS);
+	CHECK(spi_nor_add_partition(nor, "st-a", 0x4000, 0x1000, &b) ==
+	      TEE_ERROR_BAD_PARAMETERS);
+	CHECK(spi_nor_add_partition(nor, "st-b", 0x2100, 0x1000, &b) ==
+	      TEE_ERROR_BAD_PARAMETERS);
+	CHECK(spi_nor_add_partition(nor, "st-b", 0x2000, 0, &b) ==
+	      TEE_ERROR_BAD_PARAMETERS);
+	CHECK(spi_nor_add_partition(nor, "", 0x2000, 0x1000, &b) ==
+	      TEE_ERROR_BAD_PARAMETERS);
+	CHECK(!spi_nor_find_partition("st-b"));
+
+	/* Adjacent is fine */
+	CHECK(!spi_nor_add_partition(nor, "st-b", 0x2000, 0x1000, &b));
+	CHECK(spi_nor_find_partition("st-b") == b);
+
+	if (a)
+		spi_nor_del_partition(a);
+	if (b)
+		spi_nor_del_partition(b);
+	CHECK(!spi_nor_find_partition("st-a"));
+	CHECK(!spi_nor_find_partition("st-b"));
+}
+
 TEE_Result spi_nor_self_test(void)
 {
 	struct spi_nor *nor = spi_nor_sim_get();
@@ -176,6 +210,7 @@ TEE_Result spi_nor_self_test(void)
 		failures++;
 	} else {
 		test_nor(nor);
+		test_partitions(nor);
 	}
 
 	return failures ? TEE_ERROR_GENERIC : TEE_SUCCESS;

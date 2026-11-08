@@ -48,6 +48,23 @@ struct spi_nor_info {
 
 struct spi_nor;
 
+#define SPI_NOR_PART_LABEL_LEN		32
+
+/**
+ * struct spi_nor_partition - Named region of a SPI-NOR flash
+ *
+ * @nor: Flash holding the region
+ * @label: Partition name, e.g. "optee-fs"
+ * @offs: Byte offset in the flash, aligned to the smallest erase unit
+ * @size: Size in bytes, a multiple of the smallest erase unit
+ */
+struct spi_nor_partition {
+	struct spi_nor *nor;
+	char label[SPI_NOR_PART_LABEL_LEN];
+	uint64_t offs;
+	uint64_t size;
+};
+
 #ifdef CFG_DRIVERS_SPI_NOR
 /**
  * spi_nor_probe() - Identify a SPI-NOR flash and create its device
@@ -125,6 +142,46 @@ TEE_Result spi_nor_write(struct spi_nor *nor, uint64_t offs, const void *buf,
  *	erased range is not read back
  */
 TEE_Result spi_nor_erase(struct spi_nor *nor, uint64_t offs, size_t len);
+
+/**
+ * spi_nor_add_partition() - Declare a named region of a flash
+ *
+ * @nor: SPI-NOR device
+ * @label: Unique partition name, shorter than SPI_NOR_PART_LABEL_LEN
+ * @offs: Byte offset, aligned to the smallest erase unit
+ * @size: Size in bytes, a non-zero multiple of the smallest erase unit
+ * @out_part: Output partition upon success, or NULL
+ *
+ * Partitions normally come from the "partitions" subnode of the flash DT
+ * node. They must not overlap.
+ *
+ * Return TEE_SUCCESS on success
+ * Return TEE_ERROR_BAD_PARAMETERS on a bad label or range, an overlap or a
+ *	duplicate label
+ * Return TEE_ERROR_OUT_OF_MEMORY on allocation failure
+ */
+TEE_Result spi_nor_add_partition(struct spi_nor *nor, const char *label,
+				 uint64_t offs, uint64_t size,
+				 struct spi_nor_partition **out_part);
+
+/**
+ * spi_nor_find_partition() - Find a partition by name
+ *
+ * @label: Partition name
+ *
+ * Return the partition, or NULL if no probed flash declares it
+ */
+struct spi_nor_partition *spi_nor_find_partition(const char *label);
+
+/**
+ * spi_nor_del_partition() - Remove a partition
+ *
+ * @part: Partition from spi_nor_add_partition() or spi_nor_find_partition()
+ *
+ * For partitions added at run time, e.g. by tests. The caller ensures that
+ * nothing uses @part any more.
+ */
+void spi_nor_del_partition(struct spi_nor_partition *part);
 #else
 static inline TEE_Result spi_nor_probe(struct spi_mem *mem __unused,
 				       struct spi_nor **out_nor __unused)
@@ -136,6 +193,12 @@ static inline TEE_Result spi_nor_get(unsigned int index __unused,
 				     struct spi_nor **out_nor __unused)
 {
 	return TEE_ERROR_ITEM_NOT_FOUND;
+}
+
+static inline struct spi_nor_partition *
+spi_nor_find_partition(const char *label __unused)
+{
+	return NULL;
 }
 #endif /* CFG_DRIVERS_SPI_NOR */
 
