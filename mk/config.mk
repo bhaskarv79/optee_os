@@ -1144,10 +1144,16 @@ endif
 #
 # CFG_SPI_NOR_FS_ALLOW_RESET lets SPI-NOR FS start empty when dirf.db is
 # missing while the anchor is not zero, as CFG_REE_FS_ALLOW_RESET does.
+#
+# With CFG_SPI_NOR_FS_DEFAULT, TEE_STORAGE_PRIVATE selects SPI-NOR FS
+# instead of REE FS or RPMB FS, so TAs and core users such as the TA
+# version database store there. Objects already in REE FS or RPMB FS stay
+# reachable only through their own storage ID.
 CFG_SPI_NOR_FS ?= n
 CFG_SPI_NOR_FS_DEVICE ?= 0
 CFG_SPI_NOR_FS_OFFSET ?= 0
 CFG_SPI_NOR_FS_SIZE ?= 0
+CFG_SPI_NOR_FS_DEFAULT ?= n
 CFG_SPI_NOR_FS_ANCHOR ?= auto
 CFG_SPI_NOR_FS_RPMC_COUNTER ?= 0
 CFG_SPI_NOR_FS_ALLOW_RESET ?= n
@@ -1164,6 +1170,7 @@ ifeq ($(CFG_SPI_NOR_FS_ANCHOR),nv_counter)
 $(call force,_CFG_SPI_NOR_FS_ANCHOR_NV_COUNTER,y)
 endif
 endif
+$(eval $(call cfg-depends-all,CFG_SPI_NOR_FS_DEFAULT,CFG_SPI_NOR_FS))
 ifeq ($(CFG_SPI_NOR_FS)-$(CFG_NS_VIRTUALIZATION),y-y)
 $(error CFG_SPI_NOR_FS does not support CFG_NS_VIRTUALIZATION)
 endif
