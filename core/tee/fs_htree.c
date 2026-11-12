@@ -656,12 +656,18 @@ static TEE_Result create_and_sync(struct tee_fs_htree **ht_arg,
 	if (res != TEE_SUCCESS)
 		return res;
 
+	/*
+	 * Start at the minimum counter so the first head written is above
+	 * it, and put the dummy head in the other slot.
+	 */
+	ht->head.counter = min_counter;
 	ht->dirty = true;
 	res = tee_fs_htree_sync_to_storage(ht_arg, hash, NULL);
 	if (res != TEE_SUCCESS)
 		return res;
 
-	return rpc_write_head(*ht_arg, 0, &dummy_head);
+	return rpc_write_head(*ht_arg, !((*ht_arg)->head.counter & 1),
+			      &dummy_head);
 }
 
 static bool ht_head_is_partially_done(const struct tee_fs_htree_image *head)
