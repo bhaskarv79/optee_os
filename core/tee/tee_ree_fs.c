@@ -364,14 +364,12 @@ static TEE_Result ree_fs_ftruncate_internal(struct tee_fs_fd *fdp,
 		if (res != TEE_SUCCESS)
 			return res;
 	} else {
+		/*
+		 * The blocks past the new end stay in storage until the
+		 * caller has committed: until then the old tree uses them.
+		 */
 		res = tee_fs_htree_truncate(&fdp->ht,
 					    new_file_len / BLOCK_SIZE);
-		if (res != TEE_SUCCESS)
-			return res;
-
-		res = fdp->fs->be->truncate(fdp->fd,
-					    ROUNDUP_DIV(new_file_len,
-							BLOCK_SIZE));
 		if (res != TEE_SUCCESS)
 			return res;
 
@@ -1147,12 +1145,17 @@ static TEE_Result ree_fs_truncate(struct tee_file_handle *fh, size_t len)
 	struct tee_fs_dirfile_dirh *dirh = NULL;
 	struct tee_fs_fd *fdp = (struct tee_fs_fd *)fh;
 	struct fs_instance *fs = fdp->fs;
+	struct tee_fs_htree_meta *meta = NULL;
+	bool shrink = false;
 
 	mutex_lock(&fs->mutex);
 
 	res = get_dirh(fs, &dirh);
 	if (res)
 		goto out;
+
+	meta = tee_fs_htree_get_meta(fdp->ht);
+	shrink = meta && len < meta->length;
 
 	res = ree_fs_ftruncate_internal(fdp, len);
 	if (res)
@@ -1166,6 +1169,15 @@ static TEE_Result ree_fs_truncate(struct tee_file_handle *fh, size_t len)
 	if (res)
 		goto out;
 	res = fs->commit_dirh_writes(fs, dirh);
+	if (res || !shrink)
+		goto out;
+
+	/*
+	 * Drop the blocks past the new end only now that no committed tree
+	 * uses them. If this fails they are just unused space.
+	 */
+	if (fs->be->truncate(fdp->fd, ROUNDUP_DIV(len, BLOCK_SIZE)))
+		DMSG("Truncation of the stored file failed");
 out:
 	put_dirh(fs, dirh, res);
 	mutex_unlock(&fs->mutex);
