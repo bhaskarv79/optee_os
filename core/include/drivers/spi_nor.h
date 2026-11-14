@@ -203,6 +203,30 @@ spi_nor_find_partition(const char *label __unused)
 }
 #endif /* CFG_DRIVERS_SPI_NOR */
 
+#ifdef CFG_SPI_NOR_GPT
+/**
+ * spi_nor_gpt_add_partitions() - Add the partitions of a GUID partition table
+ *
+ * @nor: Flash holding the table, which spans the whole flash
+ *
+ * Used entries become partitions labelled with their names; entries without
+ * an ASCII name are skipped. The primary table is used if valid, else the
+ * backup one. Either all partitions of the table are added or none.
+ *
+ * Return TEE_SUCCESS on success
+ * Return TEE_ERROR_ITEM_NOT_FOUND if the flash has no GPT
+ * Return TEE_ERROR_CORRUPT_OBJECT if no copy of the table is valid
+ * Return another TEE_Result compliant code if a partition is rejected
+ */
+TEE_Result spi_nor_gpt_add_partitions(struct spi_nor *nor);
+#else
+static inline TEE_Result
+spi_nor_gpt_add_partitions(struct spi_nor *nor __unused)
+{
+	return TEE_ERROR_NOT_SUPPORTED;
+}
+#endif
+
 #ifdef CFG_SPI_NOR_SIM
 /*
  * spi_nor_sim_get() - The simulated flash, or NULL before it is probed.
