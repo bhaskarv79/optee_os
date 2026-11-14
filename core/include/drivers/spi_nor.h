@@ -17,8 +17,9 @@
  *
  * The core speaks JEDEC SPI-NOR commands over the spi-mem interface. It
  * discovers the flash geometry from the JEDEC SFDP tables, falling back to
- * a small JEDEC ID table for parts without SFDP. Devices are created with
- * spi_nor_probe() on a struct spi_mem.
+ * a small JEDEC ID table for parts without SFDP. Devices come from DT nodes
+ * with compatible "jedec,spi-nor" under a DT_DRIVER_SPI controller, or are
+ * created with spi_nor_probe() on a struct spi_mem.
  *
  * All operations are polled and serialized by a per-device mutex, so they
  * must be called from thread context. Program and erase do not erase or
