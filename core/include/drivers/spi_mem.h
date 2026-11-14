@@ -6,6 +6,8 @@
 #ifndef __DRIVERS_SPI_MEM_H
 #define __DRIVERS_SPI_MEM_H
 
+#include <kernel/dt_driver.h>
+#include <libfdt.h>
 #include <spi.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -20,15 +22,45 @@
  * an opcode, an address, dummy cycles and a data transfer. Each phase can
  * use its own bus width (1, 2, 4 or 8 lines).
  *
- * Controller drivers implement struct spi_mem_ctrl_ops and give memory
- * device drivers a struct spi_mem for each device they drive.
+ * Controller drivers implement struct spi_mem_ctrl_ops and register
+ * themselves as DT_DRIVER_SPI providers with spi_mem_register_provider().
+ * Memory device drivers get their struct spi_mem with spi_mem_dt_get_dev(),
+ * typically through DEFINE_SPI_MEM_DEV_DRIVER().
  *
  * The interface follows the Linux and U-Boot spi-mem layer so controller
  * drivers can be ported with little change. Callers serialize accesses to
  * a device; the interface does not lock.
  */
 
-/* Device capabilities: clock phase and polarity */
+/**
+ * DEFINE_SPI_MEM_DEV_DRIVER - Declare a SPI memory device driver
+ *
+ * @__name: SPI memory device driver name
+ * @__match_table: match table associated to the driver
+ * @__spi_mem_probe: probe function with the following prototype:
+ *	TEE_Result (*probe)(struct spi_mem *mem, const void *fdt,
+ *			    int node, const void *compat_data);
+ */
+#define DEFINE_SPI_MEM_DEV_DRIVER(__name, __match_table, __spi_mem_probe) \
+	static TEE_Result __name ## _probe_spi_mem(const void *fdt, int node, \
+						   const void *compat_data) \
+	{ \
+		struct spi_mem *mem = NULL; \
+		TEE_Result res = TEE_ERROR_GENERIC; \
+		\
+		res = spi_mem_dt_get_dev(fdt, node, &mem); \
+		if (res) \
+			return res; \
+		return __spi_mem_probe(mem, fdt, node, compat_data); \
+	} \
+	DEFINE_DT_DRIVER(__name ## _dt_driver) = { \
+		.name = # __name, \
+		.type = DT_DRIVER_SPI, \
+		.match_table = __match_table, \
+		.probe = __name ## _probe_spi_mem, \
+	}
+
+/* Device capabilities, from DT properties spi-cpha, spi-cpol */
 #define SPI_MEM_CPHA		BIT(0)
 #define SPI_MEM_CPOL		BIT(1)
 
@@ -113,10 +145,10 @@ struct spi_mem_ctrl {
  * struct spi_mem - SPI memory device on a controller
  *
  * @ctrl: Controller the device is connected to
- * @cs: Chip-select index
- * @max_hz: Maximum clock frequency; 0 if unknown
- * @rx_buswidth: Lines usable to receive: 1, 2, 4 or 8
- * @tx_buswidth: Lines usable to send: 1, 2, 4 or 8
+ * @cs: Chip-select index, from the "reg" DT property
+ * @max_hz: Maximum clock frequency, from "spi-max-frequency"; 0 if unset
+ * @rx_buswidth: Lines usable to receive, from "spi-rx-bus-width"; 1 if unset
+ * @tx_buswidth: Lines usable to send, from "spi-tx-bus-width"; 1 if unset
  * @mode: SPI_MEM_CPHA and SPI_MEM_CPOL flags
  * @priv: Controller driver private data for this device
  */
@@ -130,7 +162,30 @@ struct spi_mem {
 	void *priv;
 };
 
+/**
+ * spi_mem_dt_get_func - Typedef of function to get a SPI memory device from
+ * devicetree properties
+ *
+ * @args: Pointer to devicetree description of the device to parse
+ * @data: Pointer to data given at spi_mem_register_provider() call
+ * @out_mem: Output pointer to the SPI memory device upon success
+ */
+typedef TEE_Result (*spi_mem_dt_get_func)(struct dt_pargs *args, void *data,
+					  struct spi_mem **out_mem);
+
 #ifdef CFG_DRIVERS_SPI_MEM
+/**
+ * spi_mem_create_dev() - Create a SPI memory device from a DT node
+ *
+ * @ctrl: Controller the device is connected to
+ * @fdt: Device tree to work on
+ * @node: Node of the memory device, a child of the controller node
+ *
+ * Return a struct spi_mem filled from the node, or NULL on error
+ */
+struct spi_mem *spi_mem_create_dev(struct spi_mem_ctrl *ctrl, const void *fdt,
+				   int node);
+
 /**
  * spi_mem_supports_op() - Check if an operation can be executed on a device
  *
@@ -165,6 +220,61 @@ TEE_Result spi_mem_exec_op(struct spi_mem *mem, const struct spi_mem_op *op);
 size_t spi_mem_max_xfer_size(struct spi_mem *mem);
 
 /**
+ * spi_mem_dt_get_dev() - Get a SPI memory device from its DT node
+ *
+ * @fdt: Device tree to work on
+ * @nodeoffset: Node offset of the memory device
+ * @out_mem: Output SPI memory device upon success
+ *
+ * Return TEE_SUCCESS in case of success
+ * Return TEE_ERROR_DEFER_DRIVER_INIT if the controller is not initialized
+ * Return a TEE_Result compliant code in case of error
+ */
+static inline TEE_Result spi_mem_dt_get_dev(const void *fdt, int nodeoffset,
+					    struct spi_mem **out_mem)
+{
+	TEE_Result res = TEE_ERROR_GENERIC;
+	void *mem = NULL;
+
+	res = dt_driver_device_from_parent(fdt, nodeoffset, DT_DRIVER_SPI,
+					   &mem);
+	if (!res)
+		*out_mem = mem;
+
+	return res;
+}
+
+/**
+ * spi_mem_register_provider() - Register a SPI memory controller provider
+ *	and add its child nodes to the DT probe list
+ *
+ * @fdt: Device tree to work on
+ * @nodeoffset: Node offset of the controller
+ * @get_dt_mem: Callback that returns the struct spi_mem for a child node
+ * @data: Data passed to @get_dt_mem
+ *
+ * Return a TEE_Result compliant code
+ */
+static inline TEE_Result
+spi_mem_register_provider(const void *fdt, int nodeoffset,
+			  spi_mem_dt_get_func get_dt_mem, void *data)
+{
+	TEE_Result res = TEE_ERROR_GENERIC;
+	int subnode = -1;
+
+	res = dt_driver_register_provider(fdt, nodeoffset,
+					  (get_of_device_func)get_dt_mem,
+					  data, DT_DRIVER_SPI);
+	if (res)
+		return res;
+
+	fdt_for_each_subnode(subnode, fdt, nodeoffset)
+		dt_driver_maybe_add_probe_node(fdt, subnode);
+
+	return TEE_SUCCESS;
+}
+
+/**
  * spi_mem_legacy_get_dev() - Create a SPI memory device on a legacy
  *	struct spi_chip controller
  *
@@ -187,6 +297,13 @@ TEE_Result spi_mem_legacy_get_dev(struct spi_chip *chip,
  */
 void spi_mem_legacy_free_dev(struct spi_mem *mem);
 #else
+static inline struct spi_mem *
+spi_mem_create_dev(struct spi_mem_ctrl *ctrl __unused,
+		   const void *fdt __unused, int node __unused)
+{
+	return NULL;
+}
+
 static inline bool spi_mem_supports_op(struct spi_mem *mem __unused,
 				       const struct spi_mem_op *op __unused)
 {
@@ -202,6 +319,21 @@ static inline TEE_Result spi_mem_exec_op(struct spi_mem *mem __unused,
 static inline size_t spi_mem_max_xfer_size(struct spi_mem *mem __unused)
 {
 	return 0;
+}
+
+static inline TEE_Result spi_mem_dt_get_dev(const void *fdt __unused,
+					    int nodeoffset __unused,
+					    struct spi_mem **out_mem __unused)
+{
+	return TEE_ERROR_NOT_SUPPORTED;
+}
+
+static inline TEE_Result
+spi_mem_register_provider(const void *fdt __unused, int nodeoffset __unused,
+			  spi_mem_dt_get_func get_dt_mem __unused,
+			  void *data __unused)
+{
+	return TEE_ERROR_NOT_SUPPORTED;
 }
 
 static inline TEE_Result

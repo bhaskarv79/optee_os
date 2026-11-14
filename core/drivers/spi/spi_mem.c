@@ -5,8 +5,13 @@
 
 #include <assert.h>
 #include <drivers/spi_mem.h>
+#include <inttypes.h>
+#include <kernel/dt.h>
+#include <libfdt.h>
+#include <malloc.h>
 #include <stdint.h>
 #include <tee_api_types.h>
+#include <trace.h>
 
 static bool buswidth_is_valid(uint8_t buswidth)
 {
@@ -107,4 +112,51 @@ TEE_Result spi_mem_exec_op(struct spi_mem *mem, const struct spi_mem_op *op)
 		return TEE_ERROR_NOT_SUPPORTED;
 
 	return mem->ctrl->ops->exec_op(mem, op);
+}
+
+static TEE_Result read_buswidth(const void *fdt, int node, const char *prop,
+				uint8_t *buswidth)
+{
+	uint32_t val = fdt_read_uint32_default(fdt, node, prop, 1);
+
+	if (val > UINT8_MAX || !buswidth_is_valid(val)) {
+		EMSG("Invalid %s %"PRIu32, prop, val);
+		return TEE_ERROR_BAD_FORMAT;
+	}
+
+	*buswidth = val;
+
+	return TEE_SUCCESS;
+}
+
+struct spi_mem *spi_mem_create_dev(struct spi_mem_ctrl *ctrl, const void *fdt,
+				   int node)
+{
+	struct spi_mem *mem = NULL;
+	paddr_t cs = fdt_reg_base_address(fdt, node);
+
+	if (cs == DT_INFO_INVALID_REG || cs > UINT32_MAX)
+		return NULL;
+
+	mem = calloc(1, sizeof(*mem));
+	if (!mem)
+		return NULL;
+
+	mem->ctrl = ctrl;
+	mem->cs = cs;
+	mem->max_hz = fdt_read_uint32_default(fdt, node, "spi-max-frequency",
+					      0);
+
+	if (read_buswidth(fdt, node, "spi-rx-bus-width", &mem->rx_buswidth) ||
+	    read_buswidth(fdt, node, "spi-tx-bus-width", &mem->tx_buswidth)) {
+		free(mem);
+		return NULL;
+	}
+
+	if (fdt_getprop(fdt, node, "spi-cpha", NULL))
+		mem->mode |= SPI_MEM_CPHA;
+	if (fdt_getprop(fdt, node, "spi-cpol", NULL))
+		mem->mode |= SPI_MEM_CPOL;
+
+	return mem;
 }
