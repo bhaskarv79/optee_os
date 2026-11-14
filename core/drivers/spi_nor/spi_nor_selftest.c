@@ -490,6 +490,187 @@ static void test_rpmc(struct spi_nor *nor __unused)
 }
 #endif
 
+#ifdef CFG_SPI_NOR_GPT
+#define GPT_IMG_SIZE		0x8000
+#define GPT_IMG_ENTRIES		16
+#define GPT_IMG_ENTRY_SIZE	128
+
+struct gpt_image {
+	uint8_t data[GPT_IMG_SIZE];
+};
+
+static TEE_Result gpt_image_read(void *ctx, uint64_t offs, void *buf,
+				 size_t len)
+{
+	struct gpt_image *img = ctx;
+
+	if (offs > sizeof(img->data) || len > sizeof(img->data) - offs)
+		return TEE_ERROR_BAD_PARAMETERS;
+
+	memcpy(buf, img->data + offs, len);
+
+	return TEE_SUCCESS;
+}
+
+static void gpt_put_entry(uint8_t *ent, size_t bsize, uint64_t offs,
+			  uint64_t size, const char *name)
+{
+	size_t n = 0;
+
+	memset(ent, 0, GPT_IMG_ENTRY_SIZE);
+	memset(ent, 0xa5, 32);
+	put_le64(ent + 32, offs / bsize);
+	put_le64(ent + 40, (offs + size) / bsize - 1);
+	for (n = 0; name[n]; n++)
+		ent[56 + 2 * n] = name[n];
+}
+
+static void gpt_put_header(uint8_t *img, size_t bsize, uint64_t lba,
+			   uint64_t alt, uint64_t entries_lba,
+			   uint64_t first_usable, uint64_t last_usable)
+{
+	uint8_t *hdr = img + lba * bsize;
+
+	memset(hdr, 0, bsize);
+	memcpy(hdr, "EFI PART", 8);
+	put_le32(hdr + 8, 0x00010000);
+	put_le32(hdr + 12, 92);
+	put_le64(hdr + 24, lba);
+	put_le64(hdr + 32, alt);
+	put_le64(hdr + 40, first_usable);
+	put_le64(hdr + 48, last_usable);
+	memset(hdr + 56, 0x5a, 16);
+	put_le64(hdr + 72, entries_lba);
+	put_le32(hdr + 80, GPT_IMG_ENTRIES);
+	put_le32(hdr + 84, GPT_IMG_ENTRY_SIZE);
+	put_le32(hdr + 88,
+		 spi_nor_gpt_crc32(img + entries_lba * bsize,
+				   GPT_IMG_ENTRIES * GPT_IMG_ENTRY_SIZE));
+	put_le32(hdr + 16, spi_nor_gpt_crc32(hdr, 92));
+}
+
+/*
+ * A disk of GPT_IMG_SIZE bytes in @bsize blocks with both table copies:
+ * "st-gpt-a" at 0x3000 + 0x2000, an unused entry, "st-gpt-b" at @b_offs +
+ * 0x1000 and an entry with a non-ASCII name
+ */
+static void gpt_make(struct gpt_image *img, size_t bsize, uint64_t b_offs)
+{
+	uint64_t eblocks = ROUNDUP_DIV(GPT_IMG_ENTRIES * GPT_IMG_ENTRY_SIZE,
+				       bsize);
+	uint64_t nblocks = GPT_IMG_SIZE / bsize;
+	uint64_t backup_entries = nblocks - 1 - eblocks;
+	uint8_t *ent = img->data + 2 * bsize;
+
+	memset(img->data, 0, sizeof(img->data));
+	gpt_put_entry(ent, bsize, 0x3000, 0x2000, "st-gpt-a");
+	gpt_put_entry(ent + 2 * GPT_IMG_ENTRY_SIZE, bsize, b_offs, 0x1000,
+		      "st-gpt-b");
+	gpt_put_entry(ent + 3 * GPT_IMG_ENTRY_SIZE, bsize, 0x3000, 0x1000,
+		      "st-gpt-c");
+	ent[3 * GPT_IMG_ENTRY_SIZE + 57] = 0x01;	/* U+0173 */
+	memcpy(img->data + backup_entries * bsize, ent,
+	       GPT_IMG_ENTRIES * GPT_IMG_ENTRY_SIZE);
+
+	gpt_put_header(img->data, bsize, 1, nblocks - 1, 2, 2 + eblocks,
+		       backup_entries - 1);
+	gpt_put_header(img->data, bsize, nblocks - 1, 1, backup_entries,
+		       2 + eblocks, backup_entries - 1);
+}
+
+static bool gpt_check_parts(void)
+{
+	struct spi_nor_partition *a = spi_nor_find_partition("st-gpt-a");
+	struct spi_nor_partition *b = spi_nor_find_partition("st-gpt-b");
+	bool ok = a && a->offs == 0x3000 && a->size == 0x2000 && b &&
+		  b->offs == 0x5000 && b->size == 0x1000 &&
+		  !spi_nor_find_partition("st-gpt-c");
+
+	if (a)
+		spi_nor_del_partition(a);
+	if (b)
+		spi_nor_del_partition(b);
+
+	return ok;
+}
+
+static bool gpt_none(void)
+{
+	return !spi_nor_find_partition("st-gpt-a") &&
+	       !spi_nor_find_partition("st-gpt-b");
+}
+
+static void test_gpt_bsize(struct spi_nor *nor, struct gpt_image *img,
+			   size_t bsize)
+{
+	size_t nblocks = GPT_IMG_SIZE / bsize;
+	size_t size = sizeof(img->data);
+
+	gpt_make(img, bsize, 0x5000);
+	CHECK(!spi_nor_gpt_add(nor, gpt_image_read, img, size));
+	CHECK(gpt_check_parts());
+
+	/* A bad primary header or entry array: the backup copy is used */
+	img->data[bsize + 60] ^= 1;
+	CHECK(!spi_nor_gpt_add(nor, gpt_image_read, img, size));
+	CHECK(gpt_check_parts());
+
+	gpt_make(img, bsize, 0x5000);
+	img->data[2 * bsize + 56] ^= 1;
+	CHECK(!spi_nor_gpt_add(nor, gpt_image_read, img, size));
+	CHECK(gpt_check_parts());
+
+	/* Both copies bad */
+	img->data[(nblocks - 1) * bsize + 60] ^= 1;
+	CHECK(spi_nor_gpt_add(nor, gpt_image_read, img, size) ==
+	      TEE_ERROR_CORRUPT_OBJECT);
+	CHECK(gpt_none());
+
+	/* The backup header is looked for in the last block of the disk */
+	gpt_make(img, bsize, 0x5000);
+	img->data[bsize + 60] ^= 1;
+	CHECK(spi_nor_gpt_add(nor, gpt_image_read, img, size - bsize) ==
+	      TEE_ERROR_CORRUPT_OBJECT);
+	CHECK(gpt_none());
+
+	/* An entry past the usable range, with valid CRCs */
+	gpt_make(img, bsize, GPT_IMG_SIZE - 0x1000);
+	CHECK(spi_nor_gpt_add(nor, gpt_image_read, img, size) ==
+	      TEE_ERROR_CORRUPT_OBJECT);
+	CHECK(gpt_none());
+
+	/* Overlapping entries: none is kept */
+	gpt_make(img, bsize, 0x4000);
+	CHECK(spi_nor_gpt_add(nor, gpt_image_read, img, size) ==
+	      TEE_ERROR_BAD_PARAMETERS);
+	CHECK(gpt_none());
+}
+
+static void test_gpt(struct spi_nor *nor)
+{
+	struct gpt_image *img = NULL;
+
+	/* Check value of the CRC-32 used by GPT */
+	CHECK(spi_nor_gpt_crc32("123456789", 9) == 0xcbf43926);
+
+	img = calloc(1, sizeof(*img));
+	CHECK(img);
+	if (!img)
+		return;
+
+	CHECK(spi_nor_gpt_add(nor, gpt_image_read, img, sizeof(img->data)) ==
+	      TEE_ERROR_ITEM_NOT_FOUND);
+	test_gpt_bsize(nor, img, 512);
+	test_gpt_bsize(nor, img, 4096);
+
+	free(img);
+}
+#else
+static void test_gpt(struct spi_nor *nor __unused)
+{
+}
+#endif
+
 TEE_Result spi_nor_self_test(void)
 {
 	struct spi_nor *nor = spi_nor_sim_get();
@@ -507,6 +688,7 @@ TEE_Result spi_nor_self_test(void)
 		test_dt_partitions(nor);
 		test_rpmc(nor);
 		test_ns_access(nor);
+		test_gpt(nor);
 	}
 
 	return failures ? TEE_ERROR_GENERIC : TEE_SUCCESS;
