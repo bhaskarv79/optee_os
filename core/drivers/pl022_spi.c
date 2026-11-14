@@ -289,10 +289,10 @@ static void pl022_control_cs(struct spi_chip *chip, enum gpio_level value)
 	switch (pd->cs_control) {
 	case PL022_CS_CTRL_AUTO_GPIO:
 		if (io_read8(pd->base + SSPSR) & SSPSR_BSY)
-			DMSG("pl022 busy - do NOT set CS!");
+			FMSG("pl022 busy - do NOT set CS!");
 		while (io_read8(pd->base + SSPSR) & SSPSR_BSY)
 			;
-		DMSG("pl022 done - set CS!");
+		FMSG("pl022 done - set CS!");
 
 		pd->cs_data.gpio_data.chip->ops->set_value(NULL,
 			pd->cs_data.gpio_data.pin_num, value);
@@ -360,7 +360,7 @@ static void pl022_flush_fifo(struct spi_chip *chip)
 	do {
 		while (io_read32(pd->base + SSPSR) & SSPSR_RNE) {
 			rdat = io_read32(pd->base + SSPDR);
-			DMSG("rdat: 0x%x", rdat);
+			FMSG("rdat: 0x%x", rdat);
 		}
 	} while (io_read32(pd->base + SSPSR) & SSPSR_BSY);
 }
@@ -476,7 +476,7 @@ static void pl022_start(struct spi_chip *chip)
 {
 	struct pl022_data *pd = container_of(chip, struct pl022_data, chip);
 
-	DMSG("Enable SSP");
+	FMSG("Enable SSP");
 	io_mask8(pd->base + SSPCR1, SSPCR1_SSE_ENABLE, SSPCR1_SSE);
 
 	pl022_control_cs(chip, GPIO_LEVEL_LOW);
@@ -488,7 +488,7 @@ static void pl022_end(struct spi_chip *chip)
 
 	pl022_control_cs(chip, GPIO_LEVEL_HIGH);
 
-	DMSG("Disable SSP");
+	FMSG("Disable SSP");
 	io_mask8(pd->base + SSPCR1, SSPCR1_SSE_DISABLE, SSPCR1_SSE);
 }
 
