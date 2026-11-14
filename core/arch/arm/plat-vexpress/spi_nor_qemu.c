@@ -7,8 +7,11 @@
  * Secure SPI-NOR flash of the QEMU virt machine (-machine virt,spi=secure):
  * a PL022 SPI controller with a 32 MiB JESD260 RPMC capable flash on chip
  * select 0, driven by line 0 of a dedicated PL061. OP-TEE drives the PL022
- * through the legacy spi-mem adapter and declares the flash partitions here,
- * as a secure DT would, then reports what each partition holds.
+ * through the legacy spi-mem adapter. The partitions come from the GPT of the
+ * flash with CFG_SPI_NOR_GPT, else from the table below, as a secure DT would
+ * declare them. The table also gives the normal-world access of the
+ * partitions by name, which GPT cannot express. OP-TEE then reports what each
+ * partition holds.
  */
 
 #include <drivers/pl022_spi.h>
@@ -62,6 +65,19 @@ static const struct qemu_part qemu_parts[] = {
 	{ "optee-fs", CFG_QEMU_SPI_NOR_FS_OFFSET, CFG_QEMU_SPI_NOR_FS_SIZE,
 	  SPI_NOR_NS_ACCESS_NONE },
 };
+
+/* Normal-world access of the partitions read from the GPT, by name */
+static void set_ns_access(void)
+{
+	struct spi_nor_partition *part = NULL;
+	size_t n = 0;
+
+	for (n = 0; n < ARRAY_SIZE(qemu_parts); n++) {
+		part = spi_nor_find_partition(qemu_parts[n].label);
+		if (part)
+			part->ns_access = qemu_parts[n].ns_access;
+	}
+}
 
 static TEE_Result add_partitions(struct spi_nor *nor)
 {
@@ -142,7 +158,7 @@ static const char *manufacturer(uint8_t id)
 }
 
 /* List the flash, its partitions and what they hold */
-static void report(struct spi_nor *nor)
+static void report(struct spi_nor *nor, const char *source)
 {
 	uint8_t hdr[UIMAGE_NAME_OFFS + UIMAGE_NAME_LEN] = { };
 	struct spi_nor_partition *part = NULL;
@@ -150,9 +166,9 @@ static void report(struct spi_nor *nor)
 	char what[UIMAGE_NAME_LEN + 16] = { };
 
 	spi_nor_get_info(nor, &info);
-	IMSG("QEMU SPI-NOR: %s %02x %02x %02x, %"PRIu64" MiB, partitions:",
+	IMSG("QEMU SPI-NOR: %s %02x %02x %02x, %"PRIu64" MiB, %s partitions:",
 	     manufacturer(info.jedec_id[0]), info.jedec_id[0],
-	     info.jedec_id[1], info.jedec_id[2], info.size / SIZE_1M);
+	     info.jedec_id[1], info.jedec_id[2], info.size / SIZE_1M, source);
 
 	while ((part = spi_nor_next_partition(part))) {
 		if (part->nor != nor)
@@ -202,9 +218,16 @@ static TEE_Result qemu_spi_nor_init(void)
 		return res;
 	}
 
-	res = add_partitions(nor);
-	if (!res)
-		report(nor);
+	res = spi_nor_gpt_add_partitions(nor);
+	if (!res) {
+		set_ns_access();
+		report(nor, "GPT");
+	} else if (res == TEE_ERROR_ITEM_NOT_FOUND ||
+		   res == TEE_ERROR_NOT_SUPPORTED) {
+		res = add_partitions(nor);
+		if (!res)
+			report(nor, "built-in");
+	}
 
 	return res;
 }
