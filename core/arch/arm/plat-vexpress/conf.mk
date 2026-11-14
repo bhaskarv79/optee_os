@@ -198,20 +198,26 @@ $(call force,CFG_EMBED_DTB_SOURCE_FILE,embedded_dtb_test.dts,Mandated for DT tes
 endif
 
 # CFG_QEMU_SPI_NOR drives the secure SPI-NOR flash of QEMU run with
-# "-machine virt,secure=on,spi=secure": a PL022 with a 16 MiB RPMC capable
+# "-machine virt,secure=on,spi=secure": a PL022 with a 32 MiB RPMC capable
 # flash, whose content and RPMC state can be kept in "-drive if=mtd" images
-# (index 0 and 1). Partition "optee-fs" holds SPI-NOR FS; with a non-zero
-# CFG_QEMU_SPI_NOR_NS_SIZE, partition "ns-data" is open to the normal world.
+# (index 0 and 1). The partitions below are declared at boot and those with a
+# non-zero size are listed with their content: "boot" and "kernel" are
+# readable by the normal world, "ns-data" readable and writable, "optee-fs"
+# holds SPI-NOR FS and is secure only.
 CFG_QEMU_SPI_NOR ?= n
 ifeq ($(CFG_QEMU_SPI_NOR),y)
 $(call force,CFG_PL022,y)
 $(call force,CFG_PL061,y)
 $(call force,CFG_DRIVERS_SPI_MEM,y)
 $(call force,CFG_DRIVERS_SPI_NOR,y)
-CFG_QEMU_SPI_NOR_FS_OFFSET ?= 0x400000
+CFG_QEMU_SPI_NOR_BOOT_OFFSET ?= 0x0
+CFG_QEMU_SPI_NOR_BOOT_SIZE ?= 0x200000
+CFG_QEMU_SPI_NOR_KERNEL_OFFSET ?= 0x200000
+CFG_QEMU_SPI_NOR_KERNEL_SIZE ?= 0x800000
+CFG_QEMU_SPI_NOR_NS_OFFSET ?= 0xa00000
+CFG_QEMU_SPI_NOR_NS_SIZE ?= 0x600000
+CFG_QEMU_SPI_NOR_FS_OFFSET ?= 0x1000000
 CFG_QEMU_SPI_NOR_FS_SIZE ?= 0x100000
-CFG_QEMU_SPI_NOR_NS_OFFSET ?= 0x800000
-CFG_QEMU_SPI_NOR_NS_SIZE ?= 0
 endif
 endif
 
