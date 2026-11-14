@@ -311,7 +311,7 @@ jobs:
             make_commands: |
               _make PLATFORM=vexpress-qemu_armv8a CFG_CORE_PREALLOC_EL0_TBLS=y
               _make PLATFORM=vexpress-qemu_armv8a CFG_TRANSFER_LIST=y CFG_MAP_EXT_DT_SECURE=y
-              _make PLATFORM=vexpress-qemu_armv8a CFG_DRIVERS_SPI_MEM=y CFG_DRIVERS_SPI_NOR=y CFG_SPI_NOR_SIM=y CFG_SPI_NOR_FS=y CFG_REE_FS=n
+              _make PLATFORM=vexpress-qemu_armv8a CFG_DRIVERS_SPI_MEM=y CFG_DRIVERS_SPI_NOR=y CFG_SPI_NOR_SIM=y CFG_SPI_NOR_GPT=y CFG_SPI_NOR_FS=y CFG_REE_FS=n
               _make PLATFORM=vexpress-qemu_armv8a CFG_CORE_SEL1_SPMC=y
               _make PLATFORM=vexpress-qemu_armv8a CFG_CORE_SEL2_SPMC=y CFG_CORE_PHYS_RELOCATABLE=y CFG_TZDRAM_START=0x0d304000 CFG_TZDRAM_SIZE=0x00cfc000
               _make PLATFORM=vexpress-qemu_armv8a CFG_{ATTESTATION,DEVICE_ENUM,RTC,SCMI,SECSTOR_TA_MGT,VERAISON_ATTESTATION}_PTA=y CFG_WITH_STATS=y CFG_TA_STATS=y
@@ -508,7 +508,7 @@ jobs:
               make -j$(nproc) check CFG_PAN=y
           - name: SPI-NOR FS
             make_commands: |
-              make -j$(nproc) check CFG_DRIVERS_SPI_MEM=y CFG_DRIVERS_SPI_NOR=y CFG_SPI_NOR_SIM=y CFG_SPI_NOR_SIM_SIZE=0x100000 CFG_SPI_NOR_FS=y CFG_SPI_NOR_FS_SIZE=0x80000
+              make -j$(nproc) check CFG_DRIVERS_SPI_MEM=y CFG_DRIVERS_SPI_NOR=y CFG_SPI_NOR_SIM=y CFG_SPI_NOR_GPT=y CFG_SPI_NOR_SIM_SIZE=0x100000 CFG_SPI_NOR_FS=y CFG_SPI_NOR_FS_SIZE=0x80000
           - name: SPMC_AT_EL=1
             make_commands: |
               make -j$(nproc) check SPMC_AT_EL=1 CFG_SECURE_PARTITION=y CFG_SPMC_TESTS=y
