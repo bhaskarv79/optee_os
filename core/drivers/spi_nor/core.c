@@ -8,6 +8,7 @@
 #include <drivers/spi_nor.h>
 #include <inttypes.h>
 #include <kernel/delay.h>
+#include <kernel/dt.h>
 #include <kernel/mutex.h>
 #include <malloc.h>
 #include <string.h>
@@ -403,3 +404,22 @@ TEE_Result spi_nor_probe(struct spi_mem *mem, struct spi_nor **out_nor)
 
 	return TEE_SUCCESS;
 }
+
+#ifdef CFG_DT
+static TEE_Result spi_nor_dt_probe(struct spi_mem *mem,
+				   const void *fdt __unused,
+				   int node __unused,
+				   const void *compat_data __unused)
+{
+	struct spi_nor *nor = NULL;
+
+	return spi_nor_probe(mem, &nor);
+}
+
+static const struct dt_device_match spi_nor_match_table[] = {
+	{ .compatible = "jedec,spi-nor" },
+	{ }
+};
+
+DEFINE_SPI_MEM_DEV_DRIVER(spi_nor, spi_nor_match_table, spi_nor_dt_probe);
+#endif

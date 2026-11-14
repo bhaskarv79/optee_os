@@ -1062,7 +1062,7 @@ CFG_DRIVERS_SPI_MEM ?= n
 
 # When enabled, CFG_DRIVERS_SPI_NOR embeds a SPI-NOR flash core on top of
 # CFG_DRIVERS_SPI_MEM: JEDEC SFDP discovery with an ID table fallback, and
-# polled read, program and erase.
+# polled read, program and erase. Flashes come from "jedec,spi-nor" DT nodes.
 #
 # CFG_SPI_NOR_SIM adds a simulated SPI-NOR flash of CFG_SPI_NOR_SIM_SIZE bytes
 # in secure RAM, with NOR program/erase semantics and an SFDP table. For
