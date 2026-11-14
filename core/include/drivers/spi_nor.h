@@ -212,6 +212,8 @@ spi_nor_find_partition(const char *label __unused)
  * Used entries become partitions labelled with their names; entries without
  * an ASCII name are skipped. The primary table is used if valid, else the
  * backup one. Either all partitions of the table are added or none.
+ * spi_nor_probe() of a DT flash calls this when the flash node has no
+ * "partitions" subnode.
  *
  * Return TEE_SUCCESS on success
  * Return TEE_ERROR_ITEM_NOT_FOUND if the flash has no GPT

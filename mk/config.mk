@@ -1064,9 +1064,10 @@ CFG_DRIVERS_SPI_MEM ?= n
 # CFG_DRIVERS_SPI_MEM: JEDEC SFDP discovery with an ID table fallback, and
 # polled read, program and erase. Flashes come from "jedec,spi-nor" DT nodes.
 #
-# CFG_SPI_NOR_GPT lets platform code read the partitions of a flash from a GUID
-# partition table (GPT) on it with spi_nor_gpt_add_partitions(). The normal
-# world must not be able to write the sectors holding the table.
+# CFG_SPI_NOR_GPT reads the partitions of a flash from a GUID partition table
+# (GPT) on it, when its DT node has no "partitions" subnode or when platform
+# code calls spi_nor_gpt_add_partitions(). The normal world must not be able to
+# write the sectors holding the table.
 #
 # CFG_SPI_NOR_SIM adds a simulated SPI-NOR flash of CFG_SPI_NOR_SIM_SIZE bytes
 # in secure RAM, with NOR program/erase semantics and an SFDP table. For
