@@ -155,4 +155,17 @@ enum spi_nor_sim_rpmc_fault {
 
 void spi_nor_sim_rpmc_fault(enum spi_nor_sim_rpmc_fault fault);
 
+typedef TEE_Result (*spi_nor_gpt_read_func)(void *ctx, uint64_t offs,
+					     void *buf, size_t len);
+
+/*
+ * spi_nor_gpt_add() - spi_nor_gpt_add_partitions() for a disk of @size bytes
+ *	read through @read, e.g. a test image; the partitions go to @nor
+ */
+TEE_Result spi_nor_gpt_add(struct spi_nor *nor, spi_nor_gpt_read_func read,
+			   void *ctx, uint64_t size);
+
+/* spi_nor_gpt_crc32() - CRC32 of GPT headers and entry arrays */
+uint32_t spi_nor_gpt_crc32(const void *buf, size_t len);
+
 #endif /* __SPI_NOR_PRIV_H */

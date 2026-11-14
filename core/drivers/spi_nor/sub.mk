@@ -1,4 +1,5 @@
 srcs-y += core.c
+srcs-$(CFG_SPI_NOR_GPT) += gpt.c
 srcs-y += ids.c
 srcs-y += partition.c
 srcs-$(CFG_SPI_NOR_NS_ACCESS) += spi_nor_ns.c

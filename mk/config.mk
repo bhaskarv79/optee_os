@@ -1064,6 +1064,11 @@ CFG_DRIVERS_SPI_MEM ?= n
 # CFG_DRIVERS_SPI_MEM: JEDEC SFDP discovery with an ID table fallback, and
 # polled read, program and erase. Flashes come from "jedec,spi-nor" DT nodes.
 #
+# CFG_SPI_NOR_GPT reads the partitions of a flash from a GUID partition table
+# (GPT) on it, when its DT node has no "partitions" subnode or when platform
+# code calls spi_nor_gpt_add_partitions(). The normal world must not be able to
+# write the sectors holding the table.
+#
 # CFG_SPI_NOR_SIM adds a simulated SPI-NOR flash of CFG_SPI_NOR_SIM_SIZE bytes
 # in secure RAM, with NOR program/erase semantics and an SFDP table. For
 # testing only, e.g. on QEMU: it requires CFG_INSECURE=y.
@@ -1084,6 +1089,7 @@ CFG_DRIVERS_SPI_MEM ?= n
 # the SPI bus, so this is meant for a provisioning build only, run in a
 # trusted environment. Product images must not enable it.
 CFG_DRIVERS_SPI_NOR ?= n
+CFG_SPI_NOR_GPT ?= n
 CFG_SPI_NOR_SIM ?= n
 CFG_SPI_NOR_SIM_SIZE ?= 262144
 CFG_SPI_NOR_EMBEDDED_TEST ?= $(call cfg-all-enabled,CFG_SPI_NOR_SIM \
@@ -1097,6 +1103,7 @@ CFG_SPI_NOR_TEST_NV_COUNTER ?= n
 CFG_SPI_NOR_RPMC ?= n
 CFG_RPMC_WRITE_ROOT_KEY ?= n
 $(eval $(call cfg-depends-all,CFG_DRIVERS_SPI_NOR,CFG_DRIVERS_SPI_MEM))
+$(eval $(call cfg-depends-all,CFG_SPI_NOR_GPT,CFG_DRIVERS_SPI_NOR))
 $(eval $(call cfg-depends-all,CFG_SPI_NOR_SIM,CFG_DRIVERS_SPI_NOR))
 $(eval $(call cfg-depends-all,CFG_SPI_NOR_EMBEDDED_TEST,CFG_SPI_NOR_SIM \
 	 CFG_TEE_CORE_EMBED_INTERNAL_TESTS))

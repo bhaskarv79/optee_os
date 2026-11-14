@@ -4,6 +4,7 @@
  */
 
 #include <assert.h>
+#include <config.h>
 #include <drivers/spi_mem.h>
 #include <drivers/spi_nor.h>
 #include <inttypes.h>
@@ -416,7 +417,16 @@ static TEE_Result spi_nor_dt_probe(struct spi_mem *mem, const void *fdt,
 	if (res)
 		return res;
 
-	return spi_nor_dt_add_partitions(nor, fdt, node);
+	if (!IS_ENABLED(CFG_SPI_NOR_GPT) ||
+	    fdt_subnode_offset(fdt, node, "partitions") >= 0)
+		return spi_nor_dt_add_partitions(nor, fdt, node);
+
+	/* No partitions in the DT: the flash may carry its own table */
+	res = spi_nor_gpt_add_partitions(nor);
+	if (res == TEE_ERROR_ITEM_NOT_FOUND)
+		return TEE_SUCCESS;
+
+	return res;
 }
 
 static const struct dt_device_match spi_nor_match_table[] = {
